@@ -1,0 +1,4 @@
+# Pharmco CLI — optional dependency (license signing / verification in the
+# bootstrap CLI, and by the API in Phase 1 C#). The provisioning HTTP client
+# itself is stdlib-only.
+cryptography>=42.0

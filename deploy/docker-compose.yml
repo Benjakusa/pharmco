@@ -1,0 +1,87 @@
+# ============================================================================
+# PHARMCO — production compose (VPS, Hetzner CX22-class)
+# Services: api (ASP.NET Core 8) + db (Postgres 16) + redis (7) + caddy (2)
+# Backups run from host cron via deploy/backup.sh (see deploy/README.md).
+# Optional: add uptime-kuma later for monitoring (kept out of the pod to stay
+# honest about the "4 containers" footprint).
+#
+# Bootstrap:  cp .env.example .env && ./scripts/gen-env.sh   # fills secrets
+#             docker compose up -d --build
+# ============================================================================
+name: pharmco
+
+services:
+  api:
+    build:
+      context: ../server
+      dockerfile: Pharmco.Api/Dockerfile
+    image: pharmco/api:latest
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Master: Host=db;Database=pharmco;Username=pharmco;Password=${DB_PASS:?set DB_PASS in .env}
+      Jwt__Secret: ${JWT_SECRET:?set JWT_SECRET in .env}
+      Jwt__AdminKey: ${ADMIN_KEY:?set ADMIN_KEY in .env}
+      Daraja__EncryptionKey: ${DARAJA_ENC_KEY:?set DARAJA_ENC_KEY in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pharmco
+      POSTGRES_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
+      POSTGRES_DB: pharmco
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/master:/docker-entrypoint-initdb.d:ro   # 001_master_schema.sql on first boot
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pharmco -d pharmco"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN:?set BASE_DOMAIN in .env (e.g. pharmco.co.ke)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+      - ../client-publish:/srv/pharmco-client:ro   # `dotnet publish` output, gitignored
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:

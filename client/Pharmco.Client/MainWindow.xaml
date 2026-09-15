@@ -1,0 +1,11 @@
+<Window x:Class="Pharmco.Client.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Pharmco POS — Phase-1 scaffold" Width="1000" Height="620"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="12">
+        <TextBlock Text="PHARMCO POS — connect with your pharmacy code on first launch."
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Center"/>
+    </Grid>
+</Window>

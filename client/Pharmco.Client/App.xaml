@@ -1,0 +1,9 @@
+<Application x:Class="Pharmco.Client.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+        <!-- TODO(phase 1): theme brushes, converters (error/warn/info banners,
+                            loud/striped "M-Pesa offline" UI, red license banner) -->
+    </Application.Resources>
+</Application>

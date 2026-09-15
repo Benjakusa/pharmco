@@ -1,0 +1,20 @@
+# ============================================================================
+# PHARMCO Caddyfile — served from deploy/ (volume-mounted into the caddy container)
+# Docs: https://caddyserver.com/docs/caddyfile
+# The {$BASE_DOMAIN} placeholders come from the BASE_DOMAIN env in compose.
+# ============================================================================
+
+# --- Pharmacy client downloads (static files from /srv/pharmco-client) ------
+# Serves https://pharmco.co.ke/client/ ... (the `dotnet publish` output)
+{$BASE_DOMAIN} {
+    root * /srv/pharmco-client
+    file_server
+    encode gzip
+}
+
+# --- API reverse proxy ------------------------------------------------------
+# Caddy provisions TLS automatically via Let's Encrypt.
+api.{$BASE_DOMAIN} {
+    reverse_proxy api:8080
+    encode gzip
+}

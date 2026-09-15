@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Pharmco.Client</AssemblyName>
+    <RootNamespace>Pharmco.Client</RootNamespace>
+    <!-- Distribution: self-updater over ClickOnce (ClickOnce is maintenance-mode
+         and needs paid code-signing certs). See client/Pharmco.Client/README.md. -->
+  </PropertyGroup>
+
+</Project>

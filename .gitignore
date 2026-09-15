@@ -1,0 +1,29 @@
+# --- .NET (server, client) ---
+bin/
+obj/
+*.user
+.vs/
+*.nupkg
+
+# --- Python (cli) ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+pip-wheel-metadata/
+
+# --- Secrets / env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Published client build (uploaded to VPS static host) ---
+client-publish/
+
+# --- Local scratch / validation ---
+.tmp/
+*.log
+.DS_Store
+Thumbs.db
