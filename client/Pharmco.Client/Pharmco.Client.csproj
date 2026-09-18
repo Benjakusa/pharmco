@@ -12,4 +12,22 @@
          and needs paid code-signing certs). See client/Pharmco.Client/README.md. -->
   </PropertyGroup>
 
+  <!-- Auth (PROMPT-2): shared policy (OfflineGate/IdlePolicy/UserRole) + bcrypt
+       come from Pharmco.Core so server tests and the desktop client exercise
+       the SAME decision logic. Dapper/Npgsql arrive transitively but are only
+       used server-side. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\server\Pharmco.Core\Pharmco.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- SQLCipher (credential cache only): the SQLCipher JDBC driver DLL is not a
+       NuGet artifact — ship it next to the exe (see README "Auth (Week 2)"). -->
+
 </Project>

@@ -10,9 +10,9 @@ Postgres in CI/validation (the exact round-trip lives in `.tmp/smoke.sql`).
 | table | purpose |
 |---|---|
 | `tenants` | code, name, owner phone, license claim + expiry, schema name, status |
-| `users` | tenant staff (admin/pharmacist/cashier), bcrypt hash |
+| `users` | tenant staff (admin/pharmacist/cashier), bcrypt hash; `deleted_at` soft delete (003) |
 | `daraja_config` | per-tenant M-Pesa creds, AES-256-GCM encrypted, sandbox/prod switch |
-| `refresh_tokens` | hashed, revocable refresh tokens (30 d) |
+| `refresh_tokens` | rotating refresh tokens (30 d) — 64-byte base64url stored SHA-256 hashed; `family_id` rotation + reuse detection (`003_refresh_tokens.sql`) |
 | `tenant_events` | append-only lifecycle audit (created/provisioned/renewed/…) |
 
 ## Per-tenant (one schema per pharmacy, e.g. `tenant_pharmco_001`)
@@ -52,3 +52,9 @@ credentials (refresh tokens are stored hashed server-side; M-Pesa creds never
 leave the cloud). Commodity Windows disk encryption + user accounts is the MVP
 boundary; SQLCipher commercial licensing (~$999/yr with performance/feature
 restrictions) is not justifiable at 30 tenants.
+
+**One exception (auth requirement):** the desktop **credential cache**
+(`client/Pharmco.Client/src/Services/CredentialCache.cs`) stores offline-login
+material (bcrypt password hash + DPAPI-wrapped tokens) and IS SQLCipher-encrypted
+(AES-256), with its key DPAPI-wrapped at rest. The business HUB SQLite remains
+unencrypted.

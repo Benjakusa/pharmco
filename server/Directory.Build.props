@@ -1,0 +1,7 @@
+<Project>
+  <!-- Shared settings for all Pharmco server projects (Core, Api, Cli, Tests). -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

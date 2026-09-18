@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pharmco.Core</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Shared project config (Nullable/ImplicitUsings) comes from server/Directory.Build.props -->
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+  </ItemGroup>
+
+  <!-- SQL migrations embedded so the CLI / API / tests never depend on a repo
+       path at runtime. The files live in db/ — one source of truth. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../db/master/001_master.sql">
+      <LogicalName>Pharmco.Core.Db.001_master.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../db/tenant/002_tenant_template.sql">
+      <LogicalName>Pharmco.Core.Db.002_tenant_template.sql</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

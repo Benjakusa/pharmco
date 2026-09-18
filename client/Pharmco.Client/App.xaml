@@ -6,4 +6,11 @@
         <!-- TODO(phase 1): theme brushes, converters (error/warn/info banners,
                             loud/striped "M-Pesa offline" UI, red license banner) -->
     </Application.Resources>
+    <!-- Auth bootstrap (PROMPT-2) — wire in the startup handler:
+             var auth   = new AuthService(settings.BaseUrl());
+             var cache  = CredentialCache.OpenDefault();
+             var mgr    = new SessionManager(auth, cache, new SessionManager.Options());
+             mgr.SetOnLocked(session => ShowLockScreen());      // auto-lock
+             var launch = await mgr.OnLaunchAsync(code, lastUser);
+             if (!launch.HasSession) -> ShowLogin(mgr);         // online or offline login -->
 </Application>

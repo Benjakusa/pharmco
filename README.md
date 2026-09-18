@@ -5,9 +5,11 @@ Offline-first, multi-tenant pharmacy POS for Kenya. Lightweight edition:
 client + SQLite HUB + Daraja M-Pesa.** See `docs/architecture.md` for the
 revised decisions (single-writer HUB, self-updater, no SQLCipher).
 
-**Status: Phase-0 scaffold.** DB schemas are real and validated; provisioning
-CLI is implemented + tested; server/client are structural scaffolds for the
-8-week build plan.
+**Status: Phase-0 scaffold + Week-2 auth.** DB schemas are real and validated;
+provisioning CLI is implemented + tested; server/client are structural scaffolds
+plus the implemented auth subsystem (JWT login/refresh, admin user management,
+WPF credential cache with offline login + auto-lock — see `docs/api-contract.md`
+and `client/Pharmco.Client/README.md`).
 
 ## Layout
 

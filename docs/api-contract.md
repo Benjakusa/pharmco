@@ -1,15 +1,28 @@
-# Pharmco API — endpoint contract (v0.1)
+# Pharmco API — endpoint contract (v0.2)
 
 Consumed by the WPF client (HUB sync agent), the bootstrap CLI (`cli/`), and
 Daraja. All bodies JSON. Errors: `{ "error": { "code": "...", "message": "..." } }`.
 
-## Auth (Phase 1)
+## Auth (implemented — desktop + API clients)
 
-| method | path | body / query | returns |
+| method | path | body / header | returns | notes |
+|---|---|---|---|---|
+| POST | `/api/auth/login` | `{ pharmacy_code, username, password }` | `{ access_token (15 min), refresh_token (30 d, rotating), token_type, expires_in, user { id, role, tenant_code } }` | tenant by `pharmacy_code`; bcrypt cost 12; JWT HS256 claims `tenant_id, tenant_code, user_id, role, license_expires_at`; 5 failed attempts / username / 15 min → 429; every attempt audited to `master.audit_logs` (username, tenant_code, ip, user_agent, outcome) |
+| POST | `/api/auth/refresh` | `{ refresh_token }` | new `access_token` + rotated `refresh_token` | old token revoked (`revoked_at`); replaying a revoked token kills the whole rotation family |
+| POST | `/api/auth/logout` | bearer (optional body `{ refresh_token }`) | `204` | revokes the presented refresh token, or all of the user's refresh sessions when omitted |
+| GET  | `/api/auth/session` | bearer | `{ user { id, role, tenant_code }, license_expires_at, token_expires_at }` | used by the desktop client at launch to validate cached credentials online |
+
+## Users (admin only — `[Authorize(Roles = "admin")]`)
+
+| method | path | body | returns |
 |---|---|---|---|
-| POST | `/v1/auth/token` | `{ code, username, password, device {machine_id, name} }` | `{ access_token (15 min), refresh_token (30 d), license {status, expires_at, days_left, max_users, max_terminals} }` |
-| POST | `/v1/auth/refresh` | `{ refresh_token }` | new access + (rotated) refresh |
-| POST | `/v1/auth/device/heartbeat` | (bearer) `{ device_id }` | `{ ok }` — used for check-in gate (≤ 14 d) and `last_seen_at` |
+| GET    | `/api/users`             | bearer    | `{ users: [{ id, username, role, is_active, last_login_at, created_at }] }` |
+| POST   | `/api/users`             | `{ username, password, role }` | `201 { user }` |
+| PATCH  | `/api/users/{id}`        | `{ role?, is_active? }` | `{ user }` |
+| DELETE | `/api/users/{id}`        | —         | `204` (soft delete: `is_active=false`, `deleted_at=now()`) |
+
+Roles (fixed enum): `admin` = full access · `pharmacist` = sales, stock, view
+reports · `cashier` = sales only (no stock edit, no user mgmt).
 
 ## Tenant lifecycle (admin — `X-Admin-Key` header)
 

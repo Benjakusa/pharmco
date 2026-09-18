@@ -1,0 +1,39 @@
+<UserControl x:Class="Pharmco.Client.Views.SyncStatusIndicator"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             d:DesignHeight="24" d:DesignWidth="120"
+             Width="120" Height="24">
+    <Grid>
+        <Border x:Name="StatusBorder" CornerRadius="12" Padding="8,4"
+                Background="#E0E0E0" BorderBrush="#CCCCCC" BorderThickness="1">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Ellipse x:Name="StatusDot" Width="8" Height="8" Margin="0,0,6,0">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="#9E9E9E"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Status}" Value="Synced">
+                                    <Setter Property="Fill" Value="#4CAF50"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="Pending">
+                                    <Setter Property="Fill" Value="#FFC107"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="Offline">
+                                    <Setter Property="Fill" Value="#F44336"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Status}" Value="Error">
+                                    <Setter Property="Fill" Value="#D32F2F"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+                <TextBlock x:Name="StatusText" Text="Syncing..." VerticalAlignment="Center"
+                           Foreground="#333333" FontSize="12"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
