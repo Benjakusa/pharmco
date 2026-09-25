@@ -34,8 +34,8 @@ builder.Services.AddSingleton<DarajaService>();
 var jwtConfig = new JwtConfig();
 jwtConfig.Issuer = builder.Configuration["Jwt:Issuer"] ?? "pharmco";
 jwtConfig.Audience = builder.Configuration["Jwt:Audience"] ?? "pharmco-client";
-jwtConfig.AccessTtlSeconds = int64.Parse(builder.Configuration["Jwt:AccessTtlMinutes"] ?? "15") * 60;
-jwtConfig.RefreshTtlSeconds = int64.Parse(builder.Configuration["Jwt:RefreshTtlDays"] ?? "30") * 86_400;
+jwtConfig.AccessTtlSeconds  = long.Parse(builder.Configuration["Jwt:AccessTtlMinutes"] ?? "15") * 60;
+jwtConfig.RefreshTtlSeconds = long.Parse(builder.Configuration["Jwt:RefreshTtlDays"]   ?? "30") * 86_400;
 builder.Services.AddSingleton(new JwtService(jwtSecret, jwtConfig));
 
 // Login failure limiter: 5 failed attempts / username / 15 min (env-tunable).

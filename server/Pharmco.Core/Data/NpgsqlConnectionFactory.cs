@@ -49,7 +49,8 @@ public sealed class NpgsqlConnectionFactory
     /// </summary>
     public static async Task SetSearchPathAsync(NpgsqlConnection connection, string searchPath, CancellationToken ct = default)
     {
-        await using var cmd = new NpgsqlCommand($"SET search_path TO {searchPath}", connection);
+        var quotedPaths = string.Join(", ", searchPath.Split(',').Select(p => $"\"{p.Trim()}\""));
+        await using var cmd = new NpgsqlCommand($"SET search_path TO {quotedPaths}", connection);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 }

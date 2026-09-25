@@ -68,8 +68,10 @@ public static class MpesaCallbackEndpoint
         logger.LogInformation("Callback received for shortcode {Shortcode}, checkout {CheckoutId}",
             shortcode, callback.CheckoutRequestID);
 
+        await using var conn = await daraja.GetOpenConnectionAsync();
+
         // Look up tenant by matching shortcode (exact match on stored shortcode)
-        var tenantId = await FindTenantByShortCodeAsync(daraja, shortcode, logger);
+        var tenantId = await FindTenantByShortCodeAsync(conn, shortcode, logger);
         if (tenantId is null)
         {
             logger.LogWarning("Unknown shortcode {Shortcode} — rejected", shortcode);
@@ -78,7 +80,6 @@ public static class MpesaCallbackEndpoint
         }
 
         // Idempotency check: has this CheckoutRequestID been processed?
-        await using var conn = await daraja.GetOpenConnectionAsync();
         var processed = await conn.ExecuteScalarAsync<int?>(
             "SELECT 1 FROM master.daraja_callback_log WHERE checkout_request_id = @CheckoutRequestId",
             new { CheckoutRequestId = callback.CheckoutRequestID }, commandTimeout: 30);
@@ -174,12 +175,10 @@ public static class MpesaCallbackEndpoint
     // ------------------------------------------------------------------
 
     private static async Task<Guid?> FindTenantByShortCodeAsync(
-        DarajaService daraja,
+        NpgsqlConnection conn,
         string shortcode,
         ILogger logger)
     {
-        await using var conn = await daraja.GetOpenConnectionAsync();
-
         // Query master.daraja_config for matching shortcode
         // Shortcode is stored in plaintext (only secrets are encrypted)
         var row = await conn.QuerySingleOrDefaultAsync<DarajaConfigRow>(
@@ -215,13 +214,13 @@ public static class MpesaCallbackEndpoint
             return;
         }
 
-        var salesTable = $"{tenant.SchemaName}.sales";
+        var salesTable = $"\"{tenant.SchemaName}\".sales";
 
         await conn.ExecuteAsync(
             $"UPDATE {salesTable} SET status = 'completed', " +
             $"mpesa_ref = @ReceiptNo, updated_at = NOW() " +
-            $"WHERE invoice_no = @InvoiceNo AND tenant_id = @TenantId",
-            new { ReceiptNo = receiptNo, InvoiceNo = invoiceNo, TenantId = tenantId },
+            $"WHERE invoice_no = @InvoiceNo",
+            new { ReceiptNo = receiptNo, InvoiceNo = invoiceNo },
             commandTimeout: 30);
     }
 
@@ -243,12 +242,12 @@ public static class MpesaCallbackEndpoint
             return;
         }
 
-        var salesTable = $"{tenant.SchemaName}.sales";
+        var salesTable = $"\"{tenant.SchemaName}\".sales";
 
         await conn.ExecuteAsync(
             $"UPDATE {salesTable} SET status = 'failed', updated_at = NOW() " +
-            $"WHERE invoice_no = @InvoiceNo AND tenant_id = @TenantId",
-            new { InvoiceNo = invoiceNo, TenantId = tenantId },
+            $"WHERE invoice_no = @InvoiceNo",
+            new { InvoiceNo = invoiceNo },
             commandTimeout: 30);
     }
 

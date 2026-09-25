@@ -3,7 +3,6 @@ namespace Pharmco.Api.Endpoints;
 using Pharmco.Api.Services;
 using Pharmco.Core.Auth;
 using Pharmco.Core.Tenants;
-using java.time;
 
 /// <summary>
 /// POST /api/auth/login · POST /api/auth/refresh · POST /api/auth/logout ·
@@ -58,7 +57,7 @@ public static class AuthEndpoints
         }
 
         var tenant = await tenants.GetByCodeAsync(body.PharmacyCode);
-        if (tenant is null || !tenant.Status.ToLower().Equals("active"))
+        if (tenant is null || !tenant.Status.Equals("active", StringComparison.OrdinalIgnoreCase))
         {
             limiter.RecordFailure(key);
             await auth.LogLoginAsync(body.Username, body.PharmacyCode, "failure", tenant?.Id, ip, userAgent, "{\"reason\":\"unknown_tenant\"}");
@@ -74,7 +73,7 @@ public static class AuthEndpoints
             return Error("invalid_credentials", "invalid pharmacy code or credentials", StatusCodes.Status401Unauthorized);
         }
 
-        if (!user.IsActive || user.DeletedAt is not null)
+        if (!user!.IsActive || user.DeletedAt is not null)
         {
             limiter.RecordFailure(key);
             await auth.LogLoginAsync(user.Username, tenant.Code, "failure", tenant.Id, ip, userAgent, "{\"reason\":\"account_disabled\"}");
@@ -83,12 +82,12 @@ public static class AuthEndpoints
 
         // Success: clean bucket, first refresh family, audit.
         limiter.Reset(key);
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         var accessToken = jwt.IssueAccessToken(user, tenant);
         var refreshRaw = JwtService.GenerateRefreshToken();
         await auth.InsertRefreshTokenAsync(
             user.Id, Guid.NewGuid(), JwtService.HashToken(refreshRaw),
-            DateTimeOffset.ofEpochSecond(now.toEpochSecond() + jwt.RefreshTtlSeconds(), ZoneOffset.UTC),
+            now.AddSeconds(jwt.RefreshTtlSeconds()),
             ip, userAgent);
         await auth.TouchLastLoginAsync(user.Id, now);
         await auth.LogLoginAsync(user.Username, tenant.Code, "success", tenant.Id, ip, userAgent, null);
@@ -126,8 +125,8 @@ public static class AuthEndpoints
             return Error("invalid_grant", "refresh token reuse detected", StatusCodes.Status401Unauthorized);
         }
 
-        var now = DateTimeOffset.now();
-        if (row.ExpiresAt.toEpochSecond() <= now.toEpochSecond())
+        var now = DateTimeOffset.UtcNow;
+        if (row.ExpiresAt <= now)
         {
             await auth.RevokeTokenAsync(row.Id);
             return Error("invalid_grant", "refresh token expired", StatusCodes.Status401Unauthorized);
@@ -146,7 +145,7 @@ public static class AuthEndpoints
         }
 
         var tenant = await tenants.GetByIdAsync(row.TenantId);
-        if (tenant is null || !tenant.Status.ToLower().Equals("active"))
+        if (tenant is null || !tenant.Status.Equals("active", StringComparison.OrdinalIgnoreCase))
         {
             await auth.RevokeFamilyAsync(row.FamilyId);
             return Error("tenant_unavailable", "this pharmacy is not active", StatusCodes.Status403Forbidden);
@@ -155,7 +154,7 @@ public static class AuthEndpoints
         // Rotate: revoke the presented row, mint a new one in the same family.
         var newRaw = JwtService.GenerateRefreshToken();
         var newId = await auth.InsertRefreshTokenAsync(row.UserId, row.FamilyId, JwtService.HashToken(newRaw),
-            DateTimeOffset.ofEpochSecond(now.toEpochSecond() + jwt.RefreshTtlSeconds(), ZoneOffset.UTC),
+            now.AddSeconds(jwt.RefreshTtlSeconds()),
             ip, userAgent);
         await auth.RevokeTokenAsync(row.Id, newId);
 
@@ -177,7 +176,7 @@ public static class AuthEndpoints
     public static async Task<IResult> Logout(HttpContext http, LogoutRequest? body, AuthRepository auth, JwtService jwt)
     {
         var token = Authz.Bearer(http);
-        if (token.IsEmpty())
+        if (string.IsNullOrEmpty(token))
             return Error("unauthorized", "missing bearer token", StatusCodes.Status401Unauthorized);
 
         JwtClaims claims;
@@ -205,7 +204,7 @@ public static class AuthEndpoints
     public static async Task<IResult> Session(HttpContext http, JwtService jwt)
     {
         var token = Authz.Bearer(http);
-        if (token.IsEmpty())
+        if (string.IsNullOrEmpty(token))
             return Error("unauthorized", "missing bearer token", StatusCodes.Status401Unauthorized);
 
         JwtClaims claims;
@@ -215,9 +214,11 @@ public static class AuthEndpoints
         return Results.Json(new
         {
             user = new { id = claims.UserId.ToString(), role = claims.Role, tenant_code = claims.TenantCode },
-            license_expires_at = claims.LicenseExpiresAtEpoch == 0 ? (long?) null : claims.LicenseExpiresAtEpoch,
-            token_expires_at = claims.ExpiresAt.toEpochSecond(),
+            license_expires_at = claims.LicenseExpiresAtEpoch == 0 ? (long?)null : claims.LicenseExpiresAtEpoch,
+            token_expires_at = claims.ExpiresAt.ToUnixTimeSeconds(),
         }, statusCode: StatusCodes.Status200OK);
+
+        await Task.CompletedTask; // satisfy async signature
     }
 
     // --- helpers ------------------------------------------------------------------
@@ -227,23 +228,16 @@ public static class AuthEndpoints
 
     private static string ClientIp(HttpContext http)
     {
-        var forwarded = http.Request.Headers["x-forwarded-for"];
+        var forwarded = http.Request.Headers["x-forwarded-for"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(forwarded))
         {
             var first = forwarded.Split(',')[0].Trim();
-            if (!first.IsEmpty())
+            if (!string.IsNullOrEmpty(first))
                 return first;
         }
-        return http.Request.RemoteAddress ?? "";
+        return http.Connection.RemoteIpAddress?.ToString() ?? "";
     }
 
-    private static string UserAgent(HttpContext http) => http.Request.Headers["user-agent"] ?? "";
-
-    private static string Bearer(HttpContext http)
-    {
-        var header = http.Request.Headers["authorization"] ?? "";
-        if (header.ToLower().StartsWith("bearer "))
-            return header.Substring(7).Trim();
-        return "";
-    }
+    private static string UserAgent(HttpContext http)
+        => http.Request.Headers["user-agent"].FirstOrDefault() ?? "";
 }

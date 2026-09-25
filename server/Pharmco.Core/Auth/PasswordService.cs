@@ -12,15 +12,15 @@ public sealed class PasswordService
 
     public static string Hash(string raw)
     {
-        if (raw is null || raw.isEmpty())
-            throw new ArgumentException("password must not be empty", "raw");
-        return BCrypt.Hashpw(raw, BCrypt.Gensalt(Cost));
+        if (string.IsNullOrEmpty(raw))
+            throw new ArgumentException("password must not be empty", nameof(raw));
+        return BCrypt.HashPassword(raw, BCrypt.GenerateSalt(Cost));
     }
 
     public static bool Verify(string raw, string hash)
     {
-        if (raw is null || hash is null || hash.isEmpty())
+        if (string.IsNullOrEmpty(raw) || string.IsNullOrEmpty(hash))
             return false;
-        return BCrypt.Verifypw(raw, hash);
+        return BCrypt.Verify(raw, hash);
     }
 }

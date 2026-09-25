@@ -54,13 +54,27 @@ public sealed class PendingVerificationJob : BackgroundService
 
         await using var conn = await daraja.GetOpenConnectionAsync(ct);
 
-        // Get all tenants that have pending_verification sales
-        var tenantsWithPending = await conn.QueryAsync<TenantPending>(
-            @"SELECT DISTINCT t.id AS TenantId, t.schema_name AS SchemaName
+        // Get all active tenants
+        var activeTenants = await conn.QueryAsync<TenantPending>(
+            @"SELECT t.id AS TenantId, t.schema_name AS SchemaName
               FROM master.tenants t
               JOIN information_schema.schemata s ON s.schema_name = t.schema_name
               WHERE t.status = 'active'",
             commandTimeout: 30);
+
+        var activeTenantsList = activeTenants.ToList();
+        if (activeTenantsList.Count == 0) return;
+
+        // Build a single query to find which tenants actually have pending sales
+        var sqlParts = new List<string>();
+        foreach (var t in activeTenantsList)
+        {
+            sqlParts.Add($"SELECT '{t.TenantId}'::uuid AS TenantId, '{t.SchemaName}' AS SchemaName " +
+                         $"WHERE EXISTS (SELECT 1 FROM \"{t.SchemaName}\".sales WHERE status = 'pending_verification')");
+        }
+        
+        var tenantsWithPending = await conn.QueryAsync<TenantPending>(
+            string.Join(" UNION ALL ", sqlParts), commandTimeout: 30);
 
         foreach (var tenant in tenantsWithPending)
         {
@@ -82,12 +96,12 @@ public sealed class PendingVerificationJob : BackgroundService
         TenantPending tenant,
         CancellationToken ct)
     {
-        var salesTable = $"{tenant.SchemaName}.sales";
+        var salesTable = $"\"{tenant.SchemaName}\".sales";
 
         // Get pending_verification sales that are older than 1 minute
         // (give the customer time to complete the STK Push if they just made the sale)
         var pendingSales = await conn.QueryAsync<PendingSale>(
-            $"SELECT id, invoice_no, mpesa_ref, customer_phone, created_at, total " +
+            $"SELECT id, invoice_no, mpesa_ref, client_sale_uuid, customer_phone, created_at, total " +
             $"FROM {salesTable} " +
             $"WHERE status = 'pending_verification' " +
             $"AND created_at < NOW() - INTERVAL '1 minute' " +
@@ -120,7 +134,7 @@ public sealed class PendingVerificationJob : BackgroundService
         if (age > StaleThreshold)
         {
             // Flag as unverified for admin review
-            var salesTable = $"{tenant.SchemaName}.sales";
+            var salesTable = $"\"{tenant.SchemaName}\".sales";
             await conn.ExecuteAsync(
                 $"UPDATE {salesTable} SET status = 'unverified' WHERE id = @SaleId",
                 new { SaleId = sale.Id }, commandTimeout: 30);
@@ -139,31 +153,18 @@ public sealed class PendingVerificationJob : BackgroundService
             return;
         }
 
-        // For mpesa_manual sales, we have an MpesaRef from the customer
-        // Query Transaction Status API to verify
-        if (!string.IsNullOrWhiteSpace(sale.MpesaRef))
+        // Query Transaction Status API to verify using ClientSaleUuid (which contains CheckoutRequestID)
+        if (!string.IsNullOrWhiteSpace(sale.ClientSaleUuid))
         {
-            // Try to find the transaction by receipt number
-            // Note: Daraja Transaction Status API uses checkout_request_id,
-            // not receipt number. We need to track the checkout_request_id
-            // when the STK Push is sent.
-            //
-            // For mpesa_manual, the customer provides the receipt number.
-            // We should store the checkout_request_id when we send the STK Push
-            // and use that for verification.
-            //
-            // For now, we'll search by the mpesa_ref as a fallback.
-            // In production, you'd have a mapping table.
-
             var statusResult = await daraja.GetTransactionStatusAsync(
                 tenant.TenantId,
-                sale.MpesaRef,  // Using mpesa_ref as checkout request ID (not ideal)
+                sale.ClientSaleUuid,  // Using ClientSaleUuid as checkout request ID
                 ct);
 
             if (statusResult is not null && statusResult.ResponseCode == "0")
             {
                 // Verified! Mark as completed
-                var salesTable = $"{tenant.SchemaName}.sales";
+                var salesTable = $"\"{tenant.SchemaName}\".sales";
                 await conn.ExecuteAsync(
                     $"UPDATE {salesTable} SET status = 'completed', updated_at = NOW() " +
                     $"WHERE id = @SaleId",
@@ -180,8 +181,7 @@ public sealed class PendingVerificationJob : BackgroundService
         }
         else
         {
-            // No MpesaRef — this shouldn't happen for mpesa_manual sales
-            _logger.LogWarning("Sale {InvoiceNo} has no MpesaRef — cannot verify", sale.InvoiceNo);
+            _logger.LogWarning("Sale {InvoiceNo} has no ClientSaleUuid (CheckoutRequestID) — cannot verify", sale.InvoiceNo);
         }
     }
 
@@ -200,6 +200,7 @@ public sealed class PendingVerificationJob : BackgroundService
         public Guid Id { get; init; }
         public string InvoiceNo { get; init; } = "";
         public string? MpesaRef { get; init; }
+        public string? ClientSaleUuid { get; init; }
         public string? CustomerPhone { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public decimal Total { get; init; }

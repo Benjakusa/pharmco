@@ -16,7 +16,7 @@ public static class Authz
 
     /// <summary>Predicate form for .RequireAuthorization (framework gate).</summary>
     public static bool IsAdmin(HttpContext http)
-        => http.User is not null && http.User.Roles.Contains(RoleAdmin);
+        => http.User is not null && http.User.IsInRole(RoleAdmin);
 
     /// <summary>
     /// Handler-level guard. Returns a 403 <c>IResult</c> when the caller lacks
@@ -44,7 +44,7 @@ public static class Authz
     public static JwtClaims? Claims(HttpContext http, JwtService jwt)
     {
         var token = Bearer(http);
-        if (token.IsEmpty())
+        if (string.IsNullOrEmpty(token))
             return null;
         try { return jwt.VerifyAccessToken(token); }
         catch (JwtException) { return null; }

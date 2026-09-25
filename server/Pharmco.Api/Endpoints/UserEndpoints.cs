@@ -1,5 +1,6 @@
 namespace Pharmco.Api.Endpoints;
 
+using System.Text.RegularExpressions;
 using Pharmco.Api.Services;
 using Pharmco.Core.Auth;
 
@@ -15,8 +16,8 @@ using Pharmco.Core.Auth;
 /// </summary>
 public static class UserEndpoints
 {
-    private static final java.util.regex.Pattern UsernamePattern =
-        java.util.regex.Pattern.compile("^[A-Za-z0-9._@-]{3,50}$");
+    private static readonly Regex UsernamePattern =
+        new Regex(@"^[A-Za-z0-9._@-]{3,50}$", RegexOptions.Compiled);
 
     // --- DTOs --------------------------------------------------------------------
 
@@ -37,7 +38,8 @@ public static class UserEndpoints
 
     public static async Task<IResult> List(HttpContext http, AuthRepository auth, JwtService jwt)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null) return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
         var claims = Authz.Claims(http, jwt);
         if (claims is null) return Unauthorized();
 
@@ -51,20 +53,26 @@ public static class UserEndpoints
 
     public static async Task<IResult> Create(HttpContext http, CreateUserRequest body, AuthRepository auth, JwtService jwt)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null) return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
         var claims = Authz.Claims(http, jwt);
         if (claims is null) return Unauthorized();
 
         if (body is null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrEmpty(body.Password) || string.IsNullOrWhiteSpace(body.Role))
             return Error("bad_request", "username, password and role are required", StatusCodes.Status400BadRequest);
-        if (!UsernamePattern.matcher(body.Username).matches())
+        if (!UsernamePattern.IsMatch(body.Username))
             return Error("bad_request", "username must be 3-50 chars of A-Za-z0-9._@-", StatusCodes.Status400BadRequest);
         if (body.Password.Length < 8 || body.Password.Length > 72)
             return Error("bad_request", "password must be 8-72 characters", StatusCodes.Status400BadRequest);
 
         UserRole role;
-        try { role = UserRole.Parse(body.Role); }
+        try { role = UserRoles.Parse(body.Role); }
         catch (ArgumentException) { return Error("bad_request", "role must be admin|pharmacist|cashier", StatusCodes.Status400BadRequest); }
+
+        // Detect duplicate username within this tenant.
+        var existing = await auth.FindUserAsync(claims.TenantId, body.Username);
+        if (existing is not null)
+            return Error("conflict", "a user with that username already exists in this pharmacy", StatusCodes.Status409Conflict);
 
         var id = await auth.InsertUserAsync(claims.TenantId, body.Username, PasswordService.Hash(body.Password), role);
         var user = await auth.FindUserByIdAsync(id, claims.TenantId);
@@ -75,7 +83,8 @@ public static class UserEndpoints
 
     public static async Task<IResult> Patch(HttpContext http, Guid id, UpdateUserRequest body, AuthRepository auth, JwtService jwt)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null) return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
         var claims = Authz.Claims(http, jwt);
         if (claims is null) return Unauthorized();
 
@@ -85,7 +94,7 @@ public static class UserEndpoints
         string? role = null;
         if (!string.IsNullOrWhiteSpace(body.Role))
         {
-            try { role = UserRole.Parse(body.Role).ToString(); }
+            try { role = UserRoles.Parse(body.Role).ToWireString(); }
             catch (ArgumentException) { return Error("bad_request", "role must be admin|pharmacist|cashier", StatusCodes.Status400BadRequest); }
         }
 
@@ -105,7 +114,8 @@ public static class UserEndpoints
 
     public static async Task<IResult> Delete(HttpContext http, Guid id, AuthRepository auth, JwtService jwt)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null) return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
         var claims = Authz.Claims(http, jwt);
         if (claims is null) return Unauthorized();
 

@@ -7,6 +7,8 @@ using Pharmco.Api.Services;
 using Pharmco.Core.Auth;
 using Pharmco.Core.Licensing;
 using Pharmco.Core.Tenants;
+using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Pharmco.Api.Endpoints;
 
@@ -15,6 +17,7 @@ namespace Pharmco.Api.Endpoints;
 ///   POST /api/sync/push — push queued operations from client
 ///   GET  /api/sync/pull?since=ISO8601 — pull updates since timestamp
 /// Requires JWT authentication and valid tenant context.
+/// Any authenticated role (cashier, pharmacist, admin) may sync.
 /// </summary>
 public static class SyncEndpoints
 {
@@ -28,12 +31,10 @@ public static class SyncEndpoints
         TenantRepository tenantRepo,
         NpgsqlConnectionFactory connectionFactory,
         JwtService jwt,
-        LicenseService licenseService)
+        LicenseService licenseService,
+        ILogger<SyncEndpoints> logger)
     {
-        // Require auth
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
-
+        // Require any authenticated user (not admin-only — cashiers must be able to push sales)
         var claims = Authz.Claims(http, jwt);
         if (claims is null)
             return Error("unauthorized", "invalid token", StatusCodes.Status401Unauthorized);
@@ -43,7 +44,7 @@ public static class SyncEndpoints
         if (tenant is null)
             return Error("not_found", "tenant not found", StatusCodes.Status404NotFound);
 
-        // Check license expiry
+        // Check license expiry (30-day grace period)
         if (tenant.LicenseExpiresAt is { } expiry
             && DateTimeOffset.UtcNow > expiry.AddDays(30))
         {
@@ -68,12 +69,12 @@ public static class SyncEndpoints
                 try
                 {
                     var result = await ProcessOperationAsync(
-                        conn, tx, op, tenant, claims, licenseService);
+                        conn, tx, op, tenant, claims, logger);
                     results.Add(result);
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogError(ex, "Failed to process sync op {Uuid}", op.Uuid);
+                    logger.LogError(ex, "Failed to process sync op {Uuid}", op.Uuid);
                     results.Add(new
                     {
                         uuid = op.Uuid,
@@ -104,11 +105,9 @@ public static class SyncEndpoints
         TenantRepository tenantRepo,
         NpgsqlConnectionFactory connectionFactory,
         JwtService jwt,
-        LicenseService licenseService)
+        ILogger<SyncEndpoints> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
-
+        // Require any authenticated user (not admin-only — cashiers need product/user updates)
         var claims = Authz.Claims(http, jwt);
         if (claims is null)
             return Error("unauthorized", "invalid token", StatusCodes.Status401Unauthorized);
@@ -126,9 +125,16 @@ public static class SyncEndpoints
                 StatusCodes.Status403Forbidden);
         }
 
-        var sinceTime = since != null
-            ? DateTimeOffset.Parse(since)
-            : DateTimeOffset.MinValue;
+        DateTimeOffset sinceTime;
+        if (since != null)
+        {
+            if (!DateTimeOffset.TryParse(since, out sinceTime))
+                return Error("bad_request", "since must be a valid ISO 8601 date-time", StatusCodes.Status400BadRequest);
+        }
+        else
+        {
+            sinceTime = DateTimeOffset.MinValue;
+        }
 
         await using var conn = await connectionFactory.OpenAsync();
 
@@ -138,14 +144,14 @@ public static class SyncEndpoints
         // Pull users (excluding password hashes)
         var users = await PullUsersAsync(conn, tenant.Id, sinceTime);
 
-        // Get current license
-        var license = await GetCurrentLicenseAsync(tenant, licenseService);
+        // Get current license summary from tenant record
+        var license = BuildLicenseSummary(tenant);
 
         return Results.Json(new
         {
-            products = products,
-            users = users,
-            license = license,
+            products,
+            users,
+            license,
             server_time = DateTimeOffset.UtcNow
         }, statusCode: StatusCodes.Status200OK);
     }
@@ -160,14 +166,17 @@ public static class SyncEndpoints
         SyncOperationDto op,
         Tenant tenant,
         JwtClaims claims,
-        LicenseService licenseService)
+        ILogger logger)
     {
+        // Validate schema name to prevent injection (only alphanumeric + underscore allowed)
+        var schema = QuoteIdentifier(tenant.SchemaName);
+
         // Check for duplicate by client_uuid
         var existing = await conn.ExecuteScalarAsync<int>(
-            $"SELECT 1 FROM {tenant.SchemaName}.sync_queue WHERE client_uuid = @Uuid",
+            $"SELECT COUNT(1) FROM {schema}.sync_queue WHERE client_uuid = @Uuid",
             new { Uuid = op.Uuid }, tx);
 
-        if (existing == 1)
+        if (existing >= 1)
         {
             // Already processed — idempotent success
             return new { uuid = op.Uuid, status = "ok" };
@@ -183,7 +192,8 @@ public static class SyncEndpoints
                 await ProcessSaleOperationAsync(conn, tx, op, tenant, claims);
                 break;
             case "sale_item":
-                await ProcessSaleItemOperationAsync(conn, tx, op, tenant);
+                // Sale items are created as part of sale sync — ignore standalone operations
+                logger.LogDebug("Ignoring standalone sale_item sync operation {Uuid}", op.Uuid);
                 break;
             case "stock_move":
                 await ProcessStockMoveOperationAsync(conn, tx, op, tenant);
@@ -193,10 +203,11 @@ public static class SyncEndpoints
         }
 
         // Mark as synced in sync_queue
+        var schema2 = QuoteIdentifier(tenant.SchemaName);
         await conn.ExecuteAsync(
-            $"INSERT INTO {tenant.SchemaName}.sync_queue " +
-            $"(entity, operation, payload_json, client_uuid, synced_at) " +
-            $"VALUES (@Entity, @Operation, @Payload, @Uuid, NOW())",
+            $"INSERT INTO {schema2}.sync_queue " +
+            "(entity, operation, payload_json, client_uuid, synced_at) " +
+            "VALUES (@Entity, @Operation, @Payload, @Uuid, NOW())",
             new
             {
                 Entity = op.Entity,
@@ -217,37 +228,39 @@ public static class SyncEndpoints
         var product = JsonSerializer.Deserialize<ProductSyncDto>(op.Payload);
         if (product == null) throw new InvalidOperationException("Invalid product payload");
 
-        // LWW: only update if server version is newer
+        var schema = QuoteIdentifier(tenant.SchemaName);
+
+        // LWW: only update if server version is older than the client's
         var existing = await conn.ExecuteScalarAsync<DateTimeOffset?>(
-            $"SELECT updated_at FROM {tenant.SchemaName}.products WHERE id = @Id",
+            $"SELECT updated_at FROM {schema}.products WHERE id = @Id",
             new { Id = product.Id }, tx);
 
         if (existing.HasValue && existing.Value > product.UpdatedAt)
         {
-            // Client has newer data — don't overwrite
+            // Server has newer data — don't overwrite
             return;
         }
 
         if (op.Operation == "delete")
         {
             await conn.ExecuteAsync(
-                $"UPDATE {tenant.SchemaName}.products SET deleted_at = NOW() WHERE id = @Id",
+                $"UPDATE {schema}.products SET deleted_at = NOW() WHERE id = @Id",
                 new { Id = product.Id }, tx);
         }
         else
         {
             await conn.ExecuteAsync(
-                $"INSERT INTO {tenant.SchemaName}.products " +
-                $"(id, name, barcode, category, unit, buying_price, selling_price, " +
-                $"stock_qty, reorder_level, is_active, updated_at) " +
-                $"VALUES (@Id, @Name, @Barcode, @Category, @Unit, @BuyingPrice, " +
-                $"@SellingPrice, @StockQty, @ReorderLevel, @IsActive, @UpdatedAt) " +
-                $"ON CONFLICT (id) DO UPDATE SET " +
-                $"name = excluded.name, barcode = excluded.barcode, " +
-                $"category = excluded.category, unit = excluded.unit, " +
-                $"buying_price = excluded.buying_price, selling_price = excluded.selling_price, " +
-                $"stock_qty = excluded.stock_qty, reorder_level = excluded.reorder_level, " +
-                $"is_active = excluded.is_active, updated_at = excluded.updated_at",
+                $"INSERT INTO {schema}.products " +
+                "(id, name, barcode, category, unit, buying_price, selling_price, " +
+                "stock_qty, reorder_level, is_active, updated_at) " +
+                "VALUES (@Id, @Name, @Barcode, @Category, @Unit, @BuyingPrice, " +
+                "@SellingPrice, @StockQty, @ReorderLevel, @IsActive, @UpdatedAt) " +
+                "ON CONFLICT (id) DO UPDATE SET " +
+                "name = excluded.name, barcode = excluded.barcode, " +
+                "category = excluded.category, unit = excluded.unit, " +
+                "buying_price = excluded.buying_price, selling_price = excluded.selling_price, " +
+                "stock_qty = excluded.stock_qty, reorder_level = excluded.reorder_level, " +
+                "is_active = excluded.is_active, updated_at = excluded.updated_at",
                 new
                 {
                     Id = product.Id,
@@ -279,33 +292,38 @@ public static class SyncEndpoints
         var sale = JsonSerializer.Deserialize<InFlightSale>(op.Payload);
         if (sale == null) throw new InvalidOperationException("Invalid sale payload");
 
+        var schema = QuoteIdentifier(tenant.SchemaName);
+
         // Check idempotency by client_sale_uuid
         if (!string.IsNullOrEmpty(sale.ClientSaleUuid))
         {
             var existing = await conn.ExecuteScalarAsync<int>(
-                $"SELECT 1 FROM {tenant.SchemaName}.sales WHERE client_sale_uuid = @Uuid",
+                $"SELECT COUNT(1) FROM {schema}.sales WHERE client_sale_uuid = @Uuid",
                 new { Uuid = sale.ClientSaleUuid }, tx);
 
-            if (existing == 1)
+            if (existing >= 1)
                 return; // Already exists
         }
 
+        // Use the device_id from the sync operation header if available, otherwise from the JWT
+        var deviceId = Guid.TryParse(op.DeviceId, out var did) ? did : Guid.Empty;
+
         // Insert sale
         await conn.ExecuteAsync(
-            $"INSERT INTO {tenant.SchemaName}.sales " +
-            $"(id, invoice_no, device_id, cashier_user_id, customer_phone, " +
-            $"total, payment_mode, mpesa_ref, client_sale_uuid, status, created_at, updated_at) " +
-            $"VALUES (@Id, @InvoiceNo, @DeviceId, @CashierUserId, @CustomerPhone, " +
-            $"@Total, @PaymentMode, @MpesaRef, @ClientSaleUuid, 'completed', @CreatedAt, NOW())",
+            $"INSERT INTO {schema}.sales " +
+            "(id, invoice_no, device_id, cashier_user_id, customer_phone, " +
+            "total, payment_mode, mpesa_ref, client_sale_uuid, status, created_at, updated_at) " +
+            "VALUES (@Id, @InvoiceNo, @DeviceId, @CashierUserId, @CustomerPhone, " +
+            "@Total, @PaymentMode, @MpesaRef, @ClientSaleUuid, 'completed', @CreatedAt, NOW())",
             new
             {
                 Id = sale.Id,
                 InvoiceNo = sale.InvoiceNo,
-                DeviceId = Guid.NewGuid(), // Server-side device ID
+                DeviceId = deviceId,
                 CashierUserId = sale.CashierUserId,
                 CustomerPhone = (object?)sale.CustomerPhone ?? DBNull.Value,
                 Total = (double)sale.TotalCents / 100.0,
-                PaymentMode = sale.PaymentMode.ToString().ToLower(),
+                PaymentMode = sale.PaymentMode.ToString().ToLowerInvariant(),
                 MpesaRef = (object?)sale.MpesaRef ?? DBNull.Value,
                 ClientSaleUuid = (object?)sale.ClientSaleUuid ?? DBNull.Value,
                 CreatedAt = DateTimeOffset.UtcNow
@@ -315,9 +333,9 @@ public static class SyncEndpoints
         foreach (var line in sale.Lines)
         {
             await conn.ExecuteAsync(
-                $"INSERT INTO {tenant.SchemaName}.sale_items " +
-                $"(id, sale_id, product_id, qty, unit_price, subtotal) " +
-                $"VALUES (@Id, @SaleId, @ProductId, @Qty, @UnitPrice, @Subtotal)",
+                $"INSERT INTO {schema}.sale_items " +
+                "(id, sale_id, product_id, qty, unit_price, subtotal) " +
+                "VALUES (@Id, @SaleId, @ProductId, @Qty, @UnitPrice, @Subtotal)",
                 new
                 {
                     Id = Guid.NewGuid(),
@@ -333,29 +351,19 @@ public static class SyncEndpoints
         foreach (var line in sale.Lines)
         {
             await conn.ExecuteAsync(
-                $"INSERT INTO {tenant.SchemaName}.stock_moves " +
-                $"(id, product_id, device_id, user_id, qty_change, reason, ref_id, created_at) " +
-                $"VALUES (@Id, @ProductId, @DeviceId, @UserId, @QtyChange, 'sale', @RefId, NOW())",
+                $"INSERT INTO {schema}.stock_moves " +
+                "(id, product_id, device_id, user_id, qty_change, reason, ref_id, created_at) " +
+                "VALUES (@Id, @ProductId, @DeviceId, @UserId, @QtyChange, 'sale', @RefId, NOW())",
                 new
                 {
                     Id = Guid.NewGuid(),
                     ProductId = line.ProductId,
-                    DeviceId = Guid.NewGuid(),
+                    DeviceId = deviceId,
                     UserId = claims.UserId,
                     QtyChange = -(double)line.Qty,
                     RefId = sale.Id
                 }, tx);
         }
-    }
-
-    private static async Task ProcessSaleItemOperationAsync(
-        NpgsqlConnection conn,
-        NpgsqlTransaction tx,
-        SyncOperationDto op,
-        Tenant tenant)
-    {
-        // Sale items are created as part of sale sync — ignore standalone operations
-        _logger?.LogDebug("Ignoring standalone sale_item sync operation");
     }
 
     private static async Task ProcessStockMoveOperationAsync(
@@ -367,10 +375,12 @@ public static class SyncEndpoints
         var move = JsonSerializer.Deserialize<StockMoveDto>(op.Payload);
         if (move == null) throw new InvalidOperationException("Invalid stock move payload");
 
+        var schema = QuoteIdentifier(tenant.SchemaName);
+
         await conn.ExecuteAsync(
-            $"INSERT INTO {tenant.SchemaName}.stock_moves " +
-            $"(id, product_id, device_id, user_id, qty_change, reason, ref_id, created_at) " +
-            $"VALUES (@Id, @ProductId, @DeviceId, @UserId, @QtyChange, @Reason, @RefId, @CreatedAt)",
+            $"INSERT INTO {schema}.stock_moves " +
+            "(id, product_id, device_id, user_id, qty_change, reason, ref_id, created_at) " +
+            "VALUES (@Id, @ProductId, @DeviceId, @UserId, @QtyChange, @Reason, @RefId, @CreatedAt)",
             new
             {
                 Id = move.Id,
@@ -389,10 +399,11 @@ public static class SyncEndpoints
         string schemaName,
         DateTimeOffset since)
     {
+        var schema = QuoteIdentifier(schemaName);
         var products = await conn.QueryAsync<ProductRow>(
             $"SELECT id, name, barcode, category, unit, buying_price, selling_price, " +
             $"stock_qty, reorder_level, is_active, updated_at " +
-            $"FROM {schemaName}.products " +
+            $"FROM {schema}.products " +
             $"WHERE deleted_at IS NULL AND updated_at > @Since " +
             $"ORDER BY updated_at",
             new { Since = since }, commandTimeout: 30);
@@ -419,10 +430,10 @@ public static class SyncEndpoints
         DateTimeOffset since)
     {
         var users = await conn.QueryAsync<UserRow>(
-            $"SELECT id, username, role, is_active, updated_at " +
-            $"FROM master.users WHERE tenant_id = @TenantId " +
-            $"AND updated_at > @Since " +
-            $"ORDER BY updated_at",
+            "SELECT id, username, role, is_active, updated_at " +
+            "FROM master.users WHERE tenant_id = @TenantId " +
+            "AND deleted_at IS NULL AND updated_at > @Since " +
+            "ORDER BY updated_at",
             new { TenantId = tenantId, Since = since }, commandTimeout: 30);
 
         return users.Select(u => new UserSyncDto
@@ -435,38 +446,39 @@ public static class SyncEndpoints
         }).ToList();
     }
 
-    private static async Task<object?> GetCurrentLicenseAsync(
-        Tenant tenant,
-        LicenseService licenseService)
+    /// <summary>
+    /// Returns a simple license summary built from the tenant record.
+    /// No reflection. Actual limits are provisioned per-tenant via the CLI.
+    /// </summary>
+    private static object? BuildLicenseSummary(Tenant tenant)
     {
-        // Get license claims from tenant
-        if (string.IsNullOrEmpty(tenant.LicenseKey))
+        if (tenant.LicenseExpiresAt is null)
             return null;
 
-        try
+        return new
         {
-            var rsa = licenseService.GetType().GetField("_key",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-            // This is a simplified approach — in production, expose a method
-            return new
-            {
-                tenant_id = tenant.Id.ToString(),
-                code = tenant.Code,
-                expires_at = tenant.LicenseExpiresAt,
-                max_users = 10,
-                max_terminals = 5,
-                features = new[] { "pos", "inventory", "mpesa" }
-            };
-        }
-        catch
-        {
-            return null;
-        }
+            tenant_id = tenant.Id.ToString(),
+            code = tenant.Code,
+            expires_at = tenant.LicenseExpiresAt,
+            // TODO: persist per-tenant limits in master.tenants when the licensing
+            // module is wired end-to-end (Week 7). Hardcoded defaults for now.
+            max_users = 10,
+            max_terminals = 5,
+            features = new[] { "pos", "inventory", "mpesa" }
+        };
     }
 
-    private static ILogger<SyncEndpoints>? _logger;
-
-    public static void SetLogger(ILogger<SyncEndpoints> logger) => _logger = logger;
+    /// <summary>
+    /// Double-quotes a PostgreSQL identifier to prevent SQL injection via schema names.
+    /// Only allows alphanumeric characters and underscores in schema names.
+    /// </summary>
+    private static string QuoteIdentifier(string identifier)
+    {
+        // Validate: only allow safe characters in schema names
+        if (!System.Text.RegularExpressions.Regex.IsMatch(identifier, @"^[a-zA-Z_][a-zA-Z0-9_]*$"))
+            throw new InvalidOperationException($"Invalid schema identifier: {identifier}");
+        return $"\"{identifier}\"";
+    }
 
     private static IResult Error(string code, string message, int statusCode)
         => Results.Json(new { error = new { code, message } }, statusCode: statusCode);

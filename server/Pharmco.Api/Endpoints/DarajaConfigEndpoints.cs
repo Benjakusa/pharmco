@@ -1,13 +1,11 @@
 namespace Pharmco.Api.Endpoints;
 
-using System.Security.Cryptography;
-using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
 using Pharmco.Api.Services.Daraja;
 using Pharmco.Core.Security;
-using Pharmco.Core.Sales;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -36,6 +34,9 @@ public static class DarajaConfigEndpoints
         public string PhoneNumber = "";
     }
 
+    private static readonly Regex ShortcodeRegex = new(@"^\d{6,10}$", RegexOptions.Compiled);
+    private static readonly Regex PhoneRegex = new(@"^\+?\d{10,15}$", RegexOptions.Compiled);
+
     // ------------------------------------------------------------------
     // POST /api/daraja/config
     // ------------------------------------------------------------------
@@ -46,8 +47,8 @@ public static class DarajaConfigEndpoints
         DarajaService daraja,
         ILogger<DarajaConfigEndpoints> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
 
         if (body is null || string.IsNullOrWhiteSpace(body.ConsumerKey)
             || string.IsNullOrWhiteSpace(body.ConsumerSecret)
@@ -59,14 +60,14 @@ public static class DarajaConfigEndpoints
                 StatusCodes.Status400BadRequest);
         }
 
-        if (!new[] { "paybill", "till" }.Contains(body.ShortcodeType?.ToLower()))
+        if (!new[] { "paybill", "till" }.Contains(body.ShortcodeType?.ToLowerInvariant()))
         {
             return Error("bad_request", "shortcode_type must be 'paybill' or 'till'",
                 StatusCodes.Status400BadRequest);
         }
 
         // Validate shortcode format: numeric, 6-10 digits
-        if (!System.Text.RegularExpressions.Regex.IsMatch(body.Shortcode, @"^\d{6,10}$"))
+        if (!ShortcodeRegex.IsMatch(body.Shortcode))
         {
             return Error("bad_request", "shortcode must be 6-10 digits",
                 StatusCodes.Status400BadRequest);
@@ -106,7 +107,7 @@ public static class DarajaConfigEndpoints
                     ConsumerSecretEnc = consumerSecretEnc,
                     PasskeyEnc = passkeyEnc,
                     Shortcode = body.Shortcode,
-                    ShortcodeType = body.ShortcodeType.ToLower(),
+                    ShortcodeType = body.ShortcodeType!.ToLowerInvariant(),
                 }, commandTimeout: 30);
         }
         else
@@ -127,7 +128,7 @@ public static class DarajaConfigEndpoints
                     ConsumerSecretEnc = consumerSecretEnc,
                     PasskeyEnc = passkeyEnc,
                     Shortcode = body.Shortcode,
-                    ShortcodeType = body.ShortcodeType.ToLower(),
+                    ShortcodeType = body.ShortcodeType!.ToLowerInvariant(),
                 }, commandTimeout: 30);
         }
 
@@ -147,8 +148,8 @@ public static class DarajaConfigEndpoints
         DarajaService daraja,
         ILogger<DarajaConfigEndpoints> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
 
         if (body is null || string.IsNullOrWhiteSpace(body.PhoneNumber))
         {
@@ -157,7 +158,7 @@ public static class DarajaConfigEndpoints
         }
 
         // Validate phone: 10-15 digits, optionally starting with +
-        if (!System.Text.RegularExpressions.Regex.IsMatch(body.PhoneNumber, @"^\+?\d{10,15}$'))
+        if (!PhoneRegex.IsMatch(body.PhoneNumber))
         {
             return Error("bad_request", "phone_number must be 10-15 digits (optionally with + prefix)",
                 StatusCodes.Status400BadRequest);
@@ -218,8 +219,8 @@ public static class DarajaConfigEndpoints
         DarajaService daraja,
         ILogger<DarajaConfigEndpoints> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
 
         var claims = Authz.Claims(http, http.RequestServices.GetRequiredService<JwtService>());
         if (claims is null)

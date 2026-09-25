@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
@@ -8,6 +6,7 @@ using Pharmco.Api.Services;
 using Pharmco.Core.Auth;
 using Pharmco.Core.Licensing;
 using Pharmco.Core.Tenants;
+using Microsoft.Extensions.Logging;
 
 namespace Pharmco.Api.Endpoints;
 
@@ -22,10 +21,11 @@ public static class LicenseEndpoints
         LicenseRenewRequest body,
         TenantRepository tenantRepo,
         NpgsqlConnectionFactory connectionFactory,
-        JwtService jwt)
+        JwtService jwt,
+        ILogger<LicenseEndpoints> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
-            return denied;
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null) return denied;
 
         var claims = Authz.Claims(http, jwt);
         if (claims is null)
@@ -44,7 +44,7 @@ public static class LicenseEndpoints
         // Log the renewal request
         await conn.ExecuteAsync(
             "INSERT INTO master.audit_logs (tenant_id, action, detail, created_at) " +
-            "VALUES (@TenantId, 'license_renewal_request', @Detail, NOW())",
+            "VALUES (@TenantId, 'license_renewal_request', @Detail::jsonb, NOW())",
             new
             {
                 TenantId = tenant.Id,
@@ -56,7 +56,7 @@ public static class LicenseEndpoints
                 })
             }, commandTimeout: 30);
 
-        _logger?.LogInformation("License renewal requested for tenant {TenantId}, M-Pesa ref {MpesaRef}",
+        logger.LogInformation("License renewal requested for tenant {TenantId}, M-Pesa ref {MpesaRef}",
             tenant.Id, body.MpesaRef);
 
         return Results.Json(new
@@ -66,9 +66,6 @@ public static class LicenseEndpoints
             mpesa_ref = body.MpesaRef
         }, statusCode: StatusCodes.Status202Accepted);
     }
-
-    private static ILogger<LicenseEndpoints>? _logger;
-    public static void SetLogger(ILogger<LicenseEndpoints> logger) => _logger = logger;
 
     private static IResult Error(string code, string message, int statusCode)
         => Results.Json(new { error = new { code, message } }, statusCode: statusCode);
