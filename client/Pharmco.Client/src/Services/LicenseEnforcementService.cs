@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Pharmco.Client.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -177,26 +178,7 @@ public sealed class LicenseEnforcementService : IHostedService
     /// <summary>
     /// Gets the warning message for the current tier.
     /// </summary>
-    public string GetWarningMessage()
-    {
-        return _state.Tier switch
-        {
-            LicenseTier.Normal => "",
-            LicenseTier.WarningYellow =>
-                $"License renews in {_state.DaysToExpiry} days. Contact Pharmco to renew.",
-            LicenseTier.WarningRed =>
-                $"License expires in {_state.DaysToExpiry} days! Renew now.",
-            LicenseTier.DailyModal =>
-                $"Your license expires in {_state.DaysToExpiry} days. Please renew.",
-            LicenseTier.GracePeriod =>
-                "License expired! Contact Pharmco Paybill 500000 to renew.",
-            LicenseTier.ReadOnly =>
-                "License expired beyond grace period. Sales are disabled.",
-            LicenseTier.HardLock =>
-                "License expired. Contact Pharmco immediately.",
-            _ => ""
-        };
-    }
+    public string GetWarningMessage() => _state.GetWarningMessage();
 
     /// <summary>
     /// Gets renewal info for display.
@@ -269,6 +251,25 @@ public sealed class LicenseEnforcementState
     public List<string> Features { get; init; } = new();
     public DateTimeOffset ExpiresAt { get; init; }
     public LicenseEnforcementService.LicenseTier Tier { get; init; }
+
+    /// <summary>UI copy for the current tier (banner text, expiry nag).</summary>
+    public string GetWarningMessage() => Tier switch
+    {
+        LicenseEnforcementService.LicenseTier.Normal => "",
+        LicenseEnforcementService.LicenseTier.WarningYellow =>
+            $"License renews in {DaysToExpiry} days. Contact Pharmco to renew.",
+        LicenseEnforcementService.LicenseTier.WarningRed =>
+            $"License expires in {DaysToExpiry} days! Renew now.",
+        LicenseEnforcementService.LicenseTier.DailyModal =>
+            $"Your license expires in {DaysToExpiry} days. Please renew.",
+        LicenseEnforcementService.LicenseTier.GracePeriod =>
+            "License expired! Contact Pharmco Paybill 500000 to renew.",
+        LicenseEnforcementService.LicenseTier.ReadOnly =>
+            "License expired beyond grace period. Sales are disabled.",
+        LicenseEnforcementService.LicenseTier.HardLock =>
+            "License expired. Contact Pharmco immediately.",
+        _ => "",
+    };
 }
 
 public sealed record RenewalInfo

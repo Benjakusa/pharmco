@@ -1,10 +1,10 @@
 namespace Pharmco.Api.Services.Daraja;
 
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Polly;
 using Dapper;
 using Npgsql;
 using Pharmco.Core.Security;
@@ -274,28 +274,35 @@ public sealed class DarajaService : IDisposable
     internal static string RedactSecrets(string json)
     {
         if (string.IsNullOrEmpty(json)) return json;
-        return Regex.Replace(json,
-            @"""consumer_key""\s*:\s*""[^"""]+""", @"""consumer_key""\s*:\s*""****""");
+        return Regex.Replace(json, "(\"consumer_key\"\\s*:\\s*\")[^\"]+(\")", "$1****$2");
     }
 
     /// <summary>
-    /// Executes an async operation with Polly retry (3 attempts, exponential backoff).
+    /// Executes an async operation with retry (3 attempts, exponential backoff)
+    /// on transient network failures. Hand-rolled so the API carries no Polly
+    /// dependency.
     /// </summary>
     private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, CancellationToken ct)
     {
-        return await Policy
-            .Handle<HttpRequestException>()
-            .Or<TaskCanceledException>()
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-                (exception, timeSpan, retryCount, context) =>
-                {
-                    _logger.LogWarning(exception,
-                        "Daraja request retry {RetryCount} after {Delay}s: {Message}",
-                        retryCount, timeSpan.TotalSeconds, exception.Message);
-                })
-            .ExecuteAsync(operation);
+        const int maxAttempts = 3;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                if (attempt >= maxAttempts)
+                    throw;
+
+                var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                _logger.LogWarning(ex,
+                    "Daraja request retry {RetryCount} after {Delay}s: {Message}",
+                    attempt, delay.TotalSeconds, ex.Message);
+                await Task.Delay(delay, ct);
+            }
+        }
     }
 
     public void Dispose()

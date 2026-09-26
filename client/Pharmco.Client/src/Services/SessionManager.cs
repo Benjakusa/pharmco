@@ -2,7 +2,6 @@ namespace Pharmco.Client.Services;
 
 using Pharmco.Client.Models;
 using Pharmco.Core.Auth;
-using java.util.function;
 
 /// <summary>
 /// Desktop session orchestrator.
@@ -42,8 +41,8 @@ public sealed class SessionManager
     private readonly CredentialCache _cache;
     private readonly Options _options;
     private Session? _session;
-    private java.util.Timer _idleTimer;
-    private Consumer<Session> _onLocked;
+    private Timer? _idleTimer;
+    private Action<Session>? _onLocked;
 
     public SessionManager(AuthService auth, CredentialCache cache, Options options)
     {
@@ -57,7 +56,7 @@ public sealed class SessionManager
     public bool IsLocked() => _session is not null && _session.Locked;
 
     /// <summary>UI hook: invoked when auto-lock flips a session to Locked.</summary>
-    public void SetOnLocked(Consumer<Session> onLocked) => _onLocked = onLocked;
+    public void SetOnLocked(Action<Session> onLocked) => _onLocked = onLocked;
 
     // --- login ------------------------------------------------------------------
 
@@ -67,11 +66,11 @@ public sealed class SessionManager
         try { resp = await _auth.LoginAsync(pharmacyCode, username, password); }
         catch (AuthError) { return new LoginOutcome { Allowed = false, Reason = "server_rejected" }; }
 
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         _cache.Save(new CachedCredential
         {
             PharmacyCode = pharmacyCode,
-            Username = username.ToLower(),
+            Username = username.ToLowerInvariant(),
             PasswordHash = PasswordService.Hash(password),     // client-side second hash
             Role = resp.User.Role,
             TenantCode = resp.User.TenantCode,
@@ -98,7 +97,7 @@ public sealed class SessionManager
                   PasswordHash = cached.PasswordHash,
                   LastVerifiedAt = cached.LastVerifiedAt,
               };
-        var decision = OfflineGate.Evaluate(facts, password, DateTimeOffset.now());
+        var decision = OfflineGate.Evaluate(facts, password, DateTimeOffset.UtcNow);
         if (!decision.Allowed)
             return new LoginOutcome { Allowed = false, Reason = decision.Reason };
 
@@ -125,16 +124,16 @@ public sealed class SessionManager
         {
             if (await _auth.ValidateOnlineAsync(cached.AccessToken))
             {
-                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.now());
+                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.UtcNow);
                 var session = SessionFromCache(pharmacyCode, cached, offline: false);
                 StartSession(session);
                 return new LaunchOutcome { HasSession = true, Session = session };
             }
-            if (!cached.RefreshToken.IsEmpty())
+            if (!string.IsNullOrEmpty(cached.RefreshToken))
             {
                 var resp = await _auth.RefreshAsync(cached.RefreshToken);
                 _cache.UpdateTokens(pharmacyCode, username, resp.AccessToken, resp.RefreshToken);
-                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.now());
+                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.UtcNow);
                 var session = NewSession(pharmacyCode, resp, offline: false);
                 StartSession(session);
                 return new LaunchOutcome { HasSession = true, Session = session };
@@ -150,7 +149,7 @@ public sealed class SessionManager
     public void NotifyActivity()
     {
         if (_session is null) return;
-        _session.LastActivity = DateTimeOffset.now();
+        _session.LastActivity = DateTimeOffset.UtcNow;
     }
 
     public void Lock()
@@ -158,7 +157,7 @@ public sealed class SessionManager
         if (_session is null) return;
         _session.Locked = true;
         if (_onLocked is not null)
-            _onLocked.Accept(_session);
+            _onLocked(_session);
     }
 
     /// <summary>Unlock = the password verifies online (preferred) or against a fresh cache.</summary>
@@ -177,7 +176,7 @@ public sealed class SessionManager
                     PasswordHash = cached.PasswordHash,
                     LastVerifiedAt = cached.LastVerifiedAt,
                 };
-                ok = OfflineGate.Evaluate(facts, password, DateTimeOffset.now()).Allowed;
+                ok = OfflineGate.Evaluate(facts, password, DateTimeOffset.UtcNow).Allowed;
             }
         }
         if (ok && _session is not null)
@@ -209,15 +208,15 @@ public sealed class SessionManager
         _session = session;
         if (_options.AutoLockMinutes > 0)
         {
-            _idleTimer = new java.util.Timer("pharmco-idle-watcher", true);
-            _idleTimer.scheduleAtFixedRate(_options.IdleCheckIntervalSeconds, () => CheckIdle());
+            var interval = TimeSpan.FromSeconds(_options.IdleCheckIntervalSeconds);
+            _idleTimer = new Timer(_ => CheckIdle(), null, interval, interval);
         }
     }
 
     private void CheckIdle()
     {
         if (_session is null || _session.Locked) return;
-        if (IdlePolicy.ShouldLock(_session.LastActivity, DateTimeOffset.now(), _options.AutoLockMinutes))
+        if (IdlePolicy.ShouldLock(_session.LastActivity, DateTimeOffset.UtcNow, _options.AutoLockMinutes))
             Lock();
     }
 
@@ -225,14 +224,14 @@ public sealed class SessionManager
     {
         if (_idleTimer is not null)
         {
-            _idleTimer.cancel();
+            _idleTimer.Dispose();
             _idleTimer = null;
         }
     }
 
     private static Session NewSession(string pharmacyCode, LoginResponse resp, bool offline)
     {
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         return new Session
         {
             PharmacyCode = pharmacyCode,
@@ -248,7 +247,7 @@ public sealed class SessionManager
 
     private static Session SessionFromCache(string pharmacyCode, CachedCredential cached, bool offline)
     {
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         return new Session
         {
             PharmacyCode = pharmacyCode,

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Dapper;
 using Npgsql;
 using Pharmco.Api.Services.Daraja;
+using Pharmco.Core.Sales;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -22,11 +23,11 @@ public static class MpesaCallbackEndpoint
     public static async Task<IResult> HandleCallback(
         HttpContext http,
         DarajaService daraja,
-        ILogger<MpesaCallbackEndpoint> logger)
+        ILogger<ApiLog> logger)
     {
         // Read raw body for audit logging
         http.Request.EnableBuffering();
-        await using var reader = new StreamReader(http.Request.Body, leaveOpen: true);
+        using var reader = new StreamReader(http.Request.Body, leaveOpen: true);
         var rawBody = await reader.ReadToEndAsync();
         http.Request.Body.Position = 0;
 
@@ -110,14 +111,14 @@ public static class MpesaCallbackEndpoint
         {
             if (resultCode == 0)
             {
-                await MarkSalePaidAsync(conn, tenantId, invoiceNo, receiptNo, logger);
+                await MarkSalePaidAsync(conn, tenantId.Value, invoiceNo, receiptNo, logger);
                 logger.LogInformation("Sale {InvoiceNo} marked paid — receipt {ReceiptNo}",
                     invoiceNo, receiptNo);
             }
             else
             {
                 var reason = callback.ResultDesc ?? $"ResultCode={resultCode}";
-                await MarkSaleFailedAsync(conn, tenantId, invoiceNo, resultCode, reason, logger);
+                await MarkSaleFailedAsync(conn, tenantId.Value, invoiceNo, resultCode, reason, logger);
                 logger.LogWarning("Sale {InvoiceNo} marked failed — {Reason}", invoiceNo, reason);
             }
         }

@@ -1,7 +1,7 @@
-import xunit.*;
-
+using Xunit;
 using Pharmco.Core.Auth;
-using java.time;
+
+namespace Pharmco.Tests;
 
 /// <summary>
 /// Auto-lock policy tests. The WPF SessionManager keeps a timer that polls
@@ -17,9 +17,9 @@ public class SessionLockTest
         var lastActivity = T(1_000L);
 
         // Not idle yet at 4:59 min...
-        assertTrue(!IdlePolicy.ShouldLock(lastActivity, T(1_000L + 4 * 60 + 59), 5));
+        Assert.False(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 4 * 60 + 59), 5));
         // ...locked at exactly 5:00 min idle...
-        assertTrue(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 5 * 60), 5));
+        Assert.True(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 5 * 60), 5));
         // ...and the session cannot be unlocked without the password.
         var cachedHash = PasswordService.Hash("secret123");
         var facts = new CachedCredentialFacts
@@ -29,25 +29,25 @@ public class SessionLockTest
             LastVerifiedAt = T(1_000L - 86_400),
         };
         var now = T(1_000L + 5 * 60);
-        assertTrue(!OfflineGate.Evaluate(facts, "wrong-password", now).Allowed);   // unlock fails
-        assertTrue(OfflineGate.Evaluate(facts, "secret123", now).Allowed);          // unlock succeeds
+        Assert.False(OfflineGate.Evaluate(facts, "wrong-password", now).Allowed);   // unlock fails
+        Assert.True(OfflineGate.Evaluate(facts, "secret123", now).Allowed);         // unlock succeeds
     }
 
     [Fact]
     public void AutoLock_Disabled_WhenMinutesZero()
     {
         var lastActivity = T(0L);
-        assertTrue(!IdlePolicy.ShouldLock(lastActivity, T(99_999L), 0));
+        Assert.False(IdlePolicy.ShouldLock(lastActivity, T(99_999L), 0));
     }
 
     [Fact]
     public void IdleClock_RequiresConfiguredWindow()
     {
         var lastActivity = T(1_000L);
-        assertTrue(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 31 * 60), 30));
-        assertTrue(!IdlePolicy.ShouldLock(lastActivity, T(1_000L + 29 * 60), 30));
+        Assert.True(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 31 * 60), 30));
+        Assert.False(IdlePolicy.ShouldLock(lastActivity, T(1_000L + 29 * 60), 30));
     }
 
     private static DateTimeOffset T(long epochSeconds)
-        => DateTimeOffset.ofEpochSecond(epochSeconds, ZoneOffset.UTC);
+        => DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
 }

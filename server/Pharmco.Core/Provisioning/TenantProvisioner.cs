@@ -37,6 +37,17 @@ public sealed class TenantProvisioner
 {
     private const string TenantTemplateResource = "Pharmco.Core.Db.002_tenant_template.sql";
 
+    // Tenant migrations applied at provision time, in order. 004 hardens
+    // products, 005 widens payment_mode/status + adds sale_sequences, 007 adds
+    // sync_queue/client_meta — the sync engine and POS sale path need all three.
+    private static readonly string[] TenantMigrations =
+    {
+        TenantTemplateResource,
+        "Pharmco.Core.Db.004_tenant_products.sql",
+        "Pharmco.Core.Db.005_tenant_sales.sql",
+        "Pharmco.Core.Db.007_sync_queue.sql",
+    };
+
     private readonly NpgsqlConnectionFactory _factory;
     private readonly TenantRepository _repository;
     private readonly LicenseService _license;
@@ -149,10 +160,25 @@ public sealed class TenantProvisioner
     private static async Task ApplyTenantSchemaAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, string schemaName, CancellationToken ct)
     {
-        var template = await EmbeddedSql.LoadAsync(TenantTemplateResource, ct);
-        var sql = template.Replace("{tenant_schema}", schemaName, StringComparison.Ordinal);
-        await conn.ExecuteAsync(sql, transaction: tx, commandTimeout: 120);
+        foreach (var resource in TenantMigrations)
+        {
+            var template = await EmbeddedSql.LoadAsync(resource, ct);
+            var sql = StripTransactionStatements(template)
+                .Replace("{tenant_schema}", schemaName, StringComparison.Ordinal);
+            await conn.ExecuteAsync(sql, transaction: tx, commandTimeout: 120);
+        }
     }
+
+    // Migration files are also runnable standalone, so they wrap themselves in
+    // BEGIN/COMMIT. Applied inside the provisioning transaction those statements
+    // would commit the outer transaction early — drop the standalone wrappers.
+    private static string StripTransactionStatements(string sql)
+        => string.Join('\n', sql.Split('\n').Where(line =>
+        {
+            var trimmed = line.Trim();
+            return !trimmed.Equals("BEGIN;", StringComparison.OrdinalIgnoreCase)
+                && !trimmed.Equals("COMMIT;", StringComparison.OrdinalIgnoreCase);
+        }));
 
     private static async Task LogMasterAuditAsync(
         NpgsqlConnection conn, NpgsqlTransaction tx, Guid tenantId, string action, object detail)

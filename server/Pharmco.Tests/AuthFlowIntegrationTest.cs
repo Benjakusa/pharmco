@@ -1,9 +1,9 @@
-import xunit.*;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using Xunit;
 
-using java.net.URI;
-using java.net.http;
-using java.nio.charset;
-using java.time;
+namespace Pharmco.Tests;
 
 /// <summary>
 /// LIVE-STACK integration tests. They hit a running API backed by Postgres with
@@ -17,7 +17,7 @@ using java.time;
 ///   PHARMCO_TEST_PHARMACY_B=PHARMCO-002 \
 ///   dotnet test                                   # from server/Pharmco.Tests
 ///
-/// Without PHARMCO_TEST_API_URL the tests are skipped (assumption failure),
+/// Without PHARMCO_TEST_API_URL the tests are skipped (see LiveStackFactAttribute),
 /// so default CI stays green; a live stack is needed only for these.
 ///
 /// NOTE: the required-table checks are the status lines; body assertions are
@@ -31,152 +31,142 @@ public class AuthFlowIntegrationTest
     private const string EnvTenantA = "PHARMCO_TEST_PHARMACY_A";
     private const string EnvTenantB = "PHARMCO_TEST_PHARMACY_B";
 
-    private string Base => System.getenv(EnvUrl)!;
-    private string AdminUser => System.getenv(EnvUser)!;
-    private string AdminPass => System.getenv(EnvPass)!;
-    private string PharmacyA => System.getenv(EnvTenantA)!;
-    private string PharmacyB => System.getenv(EnvTenantB)!;
+    private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    [Fact]
+    private static string Base => Required(EnvUrl);
+    private static string AdminUser => Required(EnvUser);
+    private static string AdminPass => Required(EnvPass);
+    private static string PharmacyA => Required(EnvTenantA);
+    private static string PharmacyB => Required(EnvTenantB);
+
+    [LiveStackFact]
     public void Login_ValidCredentials_ReturnsTokens()
     {
-        RequiresLiveStack();
         var resp = Post("/api/auth/login", "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + AdminUser + "\",\"password\":\"" + AdminPass + "\"}", null);
 
-        assertEq(200, resp.Status);
-        assertTrue(resp.Body.Contains("\"access_token\":\""));
-        assertTrue(resp.Body.Contains("\"refresh_token\":\""));
-        assertTrue(resp.Body.Contains("\"token_type\":\"Bearer\""));
+        Assert.Equal(200, resp.Status);
+        Assert.Contains("\"access_token\":\"", resp.Body);
+        Assert.Contains("\"refresh_token\":\"", resp.Body);
+        Assert.Contains("\"token_type\":\"Bearer\"", resp.Body);
 
         // Decode the JWT payload midway: confirm tenant + admin role claims.
         var token = Between(resp.Body, "\"access_token\":\"", "\"");
         var payload = DecodePayload(token);
-        assertTrue(payload.Contains("\"tenant_id\":"));
-        assertTrue(payload.Contains("\"tenant_code\":\"" + PharmacyA + "\""));
-        assertTrue(payload.Contains("\"role\":\"admin\""));
-        assertTrue(payload.Contains("\"exp\":"));
+        Assert.Contains("\"tenant_id\":", payload);
+        Assert.Contains("\"tenant_code\":\"" + PharmacyA + "\"", payload);
+        Assert.Contains("\"role\":\"admin\"", payload);
+        Assert.Contains("\"exp\":", payload);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void Login_WrongPassword_Returns401()
     {
-        RequiresLiveStack();
         var resp = Post("/api/auth/login", "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + AdminUser + "\",\"password\":\"definitely-wrong\"}", null);
-        assertEq(401, resp.Status);
+        Assert.Equal(401, resp.Status);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void Login_5Failures_RateLimited()
     {
-        RequiresLiveStack();
-        var limiterUser = "ratelimit." + java.util.UUID.randomUUID().ToString().Substring(0, 8);
+        var limiterUser = "ratelimit." + Guid.NewGuid().ToString("N")[..8];
         var body = "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + limiterUser + "\",\"password\":\"wrong\"}";
 
         for (var i = 1; i <= 5; i++)
-            assertEq(401, Post("/api/auth/login", body, null).Status);
+            Assert.Equal(401, Post("/api/auth/login", body, null).Status);
 
         var sixth = Post("/api/auth/login", body, null);
-        assertEq(429, sixth.Status);                      // 6th attempt → 429
-        assertTrue(sixth.Body.Contains("rate_limited"));
+        Assert.Equal(429, sixth.Status);                  // 6th attempt → 429
+        Assert.Contains("rate_limited", sixth.Body);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void Login_InactiveUser_Returns403()
     {
-        RequiresLiveStack();
         var adminToken = Login(PharmacyA, AdminUser, AdminPass);
 
         // Create a user, deactivate it, then log in → 403.
-        var victim = "inactive." + java.util.UUID.randomUUID().ToString().Substring(0, 8);
+        var victim = "inactive." + Guid.NewGuid().ToString("N")[..8];
         var created = Post("/api/users",
             "{\"username\":\"" + victim + "\",\"password\":\"Password123\",\"role\":\"pharmacist\"}", adminToken);
-        assertEq(201, created.Status);
+        Assert.Equal(201, created.Status);
         var id = Between(created.Body, "\"id\":\"", "\"");
-        assertEq(200, Patch("/api/users/" + id, "{\"is_active\":false}", adminToken).Status);
+        Assert.Equal(200, Patch("/api/users/" + id, "{\"is_active\":false}", adminToken).Status);
 
         var login = Post("/api/auth/login",
             "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + victim + "\",\"password\":\"Password123\"}", null);
-        assertEq(403, login.Status);
-        assertTrue(login.Body.Contains("account_disabled"));
+        Assert.Equal(403, login.Status);
+        Assert.Contains("account_disabled", login.Body);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void Refresh_RotatesToken()
     {
-        RequiresLiveStack();
         var login = Post("/api/auth/login",
             "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + AdminUser + "\",\"password\":\"" + AdminPass + "\"}", null);
         var oldRefresh = Between(login.Body, "\"refresh_token\":\"", "\"");
 
         var rotated = Post("/api/auth/refresh", "{\"refresh_token\":\"" + oldRefresh + "\"}", null);
-        assertEq(200, rotated.Status);
+        Assert.Equal(200, rotated.Status);
 
         // Old refresh token is now revoked → reusing it is rejected (and kills the family).
         var reuse = Post("/api/auth/refresh", "{\"refresh_token\":\"" + oldRefresh + "\"}", null);
-        assertEq(401, reuse.Status);
+        Assert.Equal(401, reuse.Status);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void User_CreateByAdmin_Succeeds()
     {
-        RequiresLiveStack();
         var adminToken = Login(PharmacyA, AdminUser, AdminPass);
-        var username = "pharm1." + java.util.UUID.randomUUID().ToString().Substring(0, 8);
+        var username = "pharm1." + Guid.NewGuid().ToString("N")[..8];
 
         var resp = Post("/api/users",
             "{\"username\":\"" + username + "\",\"password\":\"Password123\",\"role\":\"pharmacist\"}", adminToken);
-        assertEq(201, resp.Status);
-        assertTrue(resp.Body.Contains("\"role\":\"pharmacist\""));
+        Assert.Equal(201, resp.Status);
+        Assert.Contains("\"role\":\"pharmacist\"", resp.Body);
 
         // The new pharmacist can actually log in.
         var login = Post("/api/auth/login",
             "{\"pharmacy_code\":\"" + PharmacyA + "\",\"username\":\"" + username + "\",\"password\":\"Password123\"}", null);
-        assertEq(200, login.Status);
+        Assert.Equal(200, login.Status);
     }
 
-    [Fact]
+    [LiveStackFact]
     public void User_CreateByCashier_Returns403()
     {
-        RequiresLiveStack();
         var adminToken = Login(PharmacyA, AdminUser, AdminPass);
-        var cashier = "cashier." + java.util.UUID.randomUUID().ToString().Substring(0, 8);
+        var cashier = "cashier." + Guid.NewGuid().ToString("N")[..8];
         Post("/api/users",
             "{\"username\":\"" + cashier + "\",\"password\":\"Password123\",\"role\":\"cashier\"}", adminToken);
 
         var cashierToken = Login(PharmacyA, cashier, "Password123");
         var resp = Post("/api/users",
             "{\"username\":\"nope\",\"password\":\"Password123\",\"role\":\"cashier\"}", cashierToken);
-        assertEq(403, resp.Status);                       // role check works
+        Assert.Equal(403, resp.Status);                   // role check works
     }
 
-    [Fact]
+    [LiveStackFact]
     public void CrossTenantLogin_WrongPharmacyCode_Fails()
     {
-        RequiresLiveStack();
         var adminToken = Login(PharmacyA, AdminUser, AdminPass);
-        var cashier = "cross." + java.util.UUID.randomUUID().ToString().Substring(0, 8);
+        var cashier = "cross." + Guid.NewGuid().ToString("N")[..8];
         Post("/api/users",
             "{\"username\":\"" + cashier + "\",\"password\":\"Password123\",\"role\":\"cashier\"}", adminToken);
 
         // Cashier of A tries Pharmacy B's code → tenant lookup fails → 401.
         var resp = Post("/api/auth/login",
             "{\"pharmacy_code\":\"" + PharmacyB + "\",\"username\":\"" + cashier + "\",\"password\":\"Password123\"}", null);
-        assertEq(401, resp.Status);
+        Assert.Equal(401, resp.Status);
     }
 
     // --- harness ----------------------------------------------------------------
 
-    private void RequiresLiveStack()
-        => Assumptions.assumeNotNull(System.getenv(EnvUrl),
-            "set PHARMCO_TEST_API_URL to run live integration tests");
+    private static string Required(string name)
+        => Environment.GetEnvironmentVariable(name)
+           ?? throw new InvalidOperationException($"{name} must be set to run live-stack tests");
 
-    private sealed class Response
-    {
-        public int Status;
-        public string Body = "";
-    }
+    private sealed record Response(int Status, string Body);
 
-    private string Login(string pharmacy, string user, string pass)
+    private static string Login(string pharmacy, string user, string pass)
     {
         var resp = Post("/api/auth/login",
             "{\"pharmacy_code\":\"" + pharmacy + "\",\"username\":\"" + user + "\",\"password\":\"" + pass + "\"}", null);
@@ -185,32 +175,29 @@ public class AuthFlowIntegrationTest
         return Between(resp.Body, "\"access_token\":\"", "\"");
     }
 
-    private Response Post(string path, string json, string? bearer)
-        => Send("POST", path, "application/json", json, bearer);
+    private static Response Post(string path, string json, string? bearer)
+        => Send(HttpMethod.Post, path, json, bearer);
 
-    private Response Patch(string path, string json, string? bearer)
-        => Send("PATCH", path, "application/json", json, bearer);
+    private static Response Patch(string path, string json, string? bearer)
+        => Send(HttpMethod.Patch, path, json, bearer);
 
-    private Response Send(string method, string path, string contentType, string body, string? bearer)
+    private static Response Send(HttpMethod method, string path, string body, string? bearer)
     {
-        var builder = HttpRequest.newBuilder(URI.Create(Base + path))
-            .header("accept", "application/json");
+        using var request = new HttpRequestMessage(method, Base + path);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (bearer is not null)
-            builder.header("authorization", "Bearer " + bearer);
-        builder.header("content-type", contentType);
-        builder.method(method, HttpRequest.BodyPublishers.ofString(body));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
-        var client = java.net.http.HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-        var resp = client.sendAsync(builder.build()).Join();   // block (JDK CompletableFuture) — tests are synchronous
-        return new Response { Status = resp.statusCode(), Body = resp.body().string() };
+        using var response = Client.Send(request);
+        var responseBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        return new Response((int)response.StatusCode, responseBody);
     }
 
     private static string Between(string text, string start, string end)
     {
-        var from = text.IndexOf(start) + start.Length;
-        var to = text.IndexOf(end, from);
+        var from = text.IndexOf(start, StringComparison.Ordinal) + start.Length;
+        var to = text.IndexOf(end, from, StringComparison.Ordinal);
         return text.Substring(from, to - from);
     }
 
@@ -220,6 +207,6 @@ public class AuthFlowIntegrationTest
         var clean = payload.Replace('-', '+').Replace('_', '/');
         var pad = (4 - clean.Length % 4) % 4;
         for (var i = 0; i < pad; i++) clean += "=";
-        return new string(java.util.Base64.getDecoder().decode(clean), Charset.UTF_8);
+        return Encoding.UTF8.GetString(Convert.FromBase64String(clean));
     }
 }

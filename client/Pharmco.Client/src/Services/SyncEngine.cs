@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -27,7 +28,7 @@ public sealed class SyncEngine : IHostedService, IDisposable
     private bool _isOnline;
 
     // Backoff schedule: 1s, 5s, 30s, 5m, 15m (cap)
-    private static readonly TimeSpan[] BackoffSchedule = new[]
+    public static readonly TimeSpan[] BackoffSchedule = new[]
     {
         TimeSpan.FromSeconds(1),
         TimeSpan.FromSeconds(5),

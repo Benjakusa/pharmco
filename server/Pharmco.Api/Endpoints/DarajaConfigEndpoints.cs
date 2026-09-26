@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Dapper;
 using Npgsql;
+using Pharmco.Api.Services;
 using Pharmco.Api.Services.Daraja;
 using Pharmco.Core.Security;
 using Pharmco.Core.Sales;
@@ -24,16 +25,16 @@ public static class DarajaConfigEndpoints
 
     public sealed class DarajaConfigRequestDto
     {
-        public string ConsumerKey = "";
-        public string ConsumerSecret = "";
-        public string Passkey = "";
-        public string Shortcode = "";
-        public string ShortcodeType = "paybill";
+        public string ConsumerKey { get; set; } = "";
+        public string ConsumerSecret { get; set; } = "";
+        public string Passkey { get; set; } = "";
+        public string Shortcode { get; set; } = "";
+        public string ShortcodeType { get; set; } = "paybill";
     }
 
     public sealed class DarajaTestRequestDto
     {
-        public string PhoneNumber = "";
+        public string PhoneNumber { get; set; } = "";
     }
 
     // ------------------------------------------------------------------
@@ -44,9 +45,10 @@ public static class DarajaConfigEndpoints
         HttpContext http,
         DarajaConfigRequestDto body,
         DarajaService daraja,
-        ILogger<DarajaConfigEndpoints> logger)
+        ILogger<ApiLog> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null)
             return denied;
 
         if (body is null || string.IsNullOrWhiteSpace(body.ConsumerKey)
@@ -59,7 +61,8 @@ public static class DarajaConfigEndpoints
                 StatusCodes.Status400BadRequest);
         }
 
-        if (!new[] { "paybill", "till" }.Contains(body.ShortcodeType?.ToLower()))
+        var shortcodeType = (body.ShortcodeType ?? "").ToLowerInvariant();
+        if (shortcodeType != "paybill" && shortcodeType != "till")
         {
             return Error("bad_request", "shortcode_type must be 'paybill' or 'till'",
                 StatusCodes.Status400BadRequest);
@@ -145,9 +148,10 @@ public static class DarajaConfigEndpoints
         HttpContext http,
         DarajaTestRequestDto body,
         DarajaService daraja,
-        ILogger<DarajaConfigEndpoints> logger)
+        ILogger<ApiLog> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null)
             return denied;
 
         if (body is null || string.IsNullOrWhiteSpace(body.PhoneNumber))
@@ -157,7 +161,7 @@ public static class DarajaConfigEndpoints
         }
 
         // Validate phone: 10-15 digits, optionally starting with +
-        if (!System.Text.RegularExpressions.Regex.IsMatch(body.PhoneNumber, @"^\+?\d{10,15}$'))
+        if (!System.Text.RegularExpressions.Regex.IsMatch(body.PhoneNumber, @"^\+?\d{10,15}$"))
         {
             return Error("bad_request", "phone_number must be 10-15 digits (optionally with + prefix)",
                 StatusCodes.Status400BadRequest);
@@ -216,9 +220,10 @@ public static class DarajaConfigEndpoints
     public static async Task<IResult> GetStatus(
         HttpContext http,
         DarajaService daraja,
-        ILogger<DarajaConfigEndpoints> logger)
+        ILogger<ApiLog> logger)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null)
             return denied;
 
         var claims = Authz.Claims(http, http.RequestServices.GetRequiredService<JwtService>());

@@ -1,6 +1,7 @@
 namespace Pharmco.Api.Endpoints;
 
 using Pharmco.Api.Services;
+using Pharmco.Core;
 
 /// <summary>
 /// Admin-role checks + token extraction helpers for the /api/users surface.
@@ -16,11 +17,12 @@ public static class Authz
 
     /// <summary>Predicate form for .RequireAuthorization (framework gate).</summary>
     public static bool IsAdmin(HttpContext http)
-        => http.User is not null && http.User.Roles.Contains(RoleAdmin);
+        => http.User?.IsInRole(RoleAdmin) ?? false;
 
     /// <summary>
     /// Handler-level guard. Returns a 403 <c>IResult</c> when the caller lacks
-    /// the admin role, or null (allowed) otherwise. Callers: <c>if (var denied = Authz.RequireAdmin(http); denied is not null) return denied;</c>
+    /// the admin role, or null (allowed) otherwise. Callers:
+    /// <c>var denied = Authz.RequireAdmin(http); if (denied is not null) return denied;</c>
     /// </summary>
     public static IResult? RequireAdmin(HttpContext http)
     {
@@ -34,8 +36,8 @@ public static class Authz
     /// <summary>Bearer token from the Authorization header, or "".</summary>
     public static string Bearer(HttpContext http)
     {
-        var header = http.Request.Headers["authorization"] ?? "";
-        if (header.ToLower().StartsWith("bearer "))
+        var header = http.Request.Headers["authorization"].ToString();
+        if (header.StartsWith("bearer ", StringComparison.OrdinalIgnoreCase))
             return header.Substring(7).Trim();
         return "";
     }

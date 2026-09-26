@@ -55,6 +55,27 @@ public sealed class LicenseService
     /// <summary>Verifies signature and expiry against a public key.</summary>
     public LicenseClaims Verify(string token, RSA publicKey)
     {
+        var claims = ParseVerified(token, publicKey);
+
+        if (claims.ExpiresAt < DateTimeOffset.UtcNow)
+            throw new LicenseException("license expired");
+
+        return claims;
+    }
+
+    /// <summary>
+    /// Verifies the signature with THIS instance's key (works for both the
+    /// private server key and the embedded public key) and returns the claims
+    /// WITHOUT enforcing expiry — callers that own an escalation timeline (the
+    /// client licence banner, the sync pull endpoint) need the expired claims.
+    /// </summary>
+    public LicenseClaims ReadClaims(string token) => ParseVerified(token, _key);
+
+    private static LicenseClaims ParseVerified(string token, RSA key)
+    {
+        if (token.IsEmpty())
+            throw new LicenseException("malformed license token");
+
         var parts = token.Split('.');
         if (parts.Length != 3)
             throw new LicenseException("malformed license token");
@@ -64,20 +85,15 @@ public sealed class LicenseService
             throw new LicenseException("unsupported license header");
 
         var signed = $"{parts[0]}.{parts[1]}";
-        var valid = publicKey.VerifyData(
+        var valid = key.VerifyData(
             Encoding.UTF8.GetBytes(signed),
             Base64UrlDecode(parts[2]),
             HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         if (!valid)
             throw new LicenseException("license signature invalid");
 
-        var claims = JsonSerializer.Deserialize<LicenseClaims>(Base64UrlDecode(parts[1]))
+        return JsonSerializer.Deserialize<LicenseClaims>(Base64UrlDecode(parts[1]))
             ?? throw new LicenseException("license payload unreadable");
-
-        if (claims.ExpiresAt < DateTimeOffset.UtcNow)
-            throw new LicenseException("license expired");
-
-        return claims;
     }
 
     private static string Base64UrlEncode(byte[] data)

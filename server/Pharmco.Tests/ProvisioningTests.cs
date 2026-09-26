@@ -29,7 +29,8 @@ public class ProvisioningTests
             "SELECT count(*) FROM information_schema.tables WHERE table_schema = @schema",
             new { schema = result.SchemaName });
 
-        Assert.Equal(5, tableCount); // products, sales, sale_items, stock_moves, audit_logs
+        Assert.Equal(8, tableCount); // products, sales, sale_items, stock_moves, audit_logs,
+                                     // sale_sequences, sync_queue, client_meta
 
         var tenant = await _db.Provisioner.FindAsync(result.Code);
         Assert.NotNull(tenant);
@@ -123,7 +124,7 @@ public class ProvisioningTests
     public async Task DeprovisionTenant_DropsSchema()
     {
         var result = await ProvisionAsync();
-        Assert.Equal(5, await TableCountAsync(result.SchemaName));
+        Assert.Equal(8, await TableCountAsync(result.SchemaName));
 
         await _db.Provisioner.DeprovisionAsync(result.Code, result.Code);
 

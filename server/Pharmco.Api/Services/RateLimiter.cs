@@ -1,7 +1,6 @@
 namespace Pharmco.Api.Services;
 
-using java.time;
-using java.util.concurrent;
+using System.Collections.Concurrent;
 
 /// <summary>
 /// Rate-limit configuration (sliding window). Defaults per the auth spec:
@@ -13,17 +12,16 @@ using java.util.concurrent;
 public sealed class RateLimiterConfig
 {
     public int MaxAttempts = 5;
-    public Duration Window = Duration.ofMinutes(15);
+    public TimeSpan Window = TimeSpan.FromMinutes(15);
 
     public static RateLimiterConfig FromParts(string? maxAttempts, string? windowMinutes)
     {
-        var cfg = new RateLimiterConfig();
-        // int32.Parse(value, min, max) — clamps to a sane range.
-        if (maxAttempts is not null && !maxAttempts.IsEmpty())
-            cfg.MaxAttempts = int32.Parse(maxAttempts, 1, 100);
-        if (windowMinutes is not null && !windowMinutes.IsEmpty())
-            cfg.Window = Duration.ofMinutes(int32.Parse(windowMinutes, 1, 60 * 24));
-        return cfg;
+        var config = new RateLimiterConfig();
+        if (int.TryParse(maxAttempts, out var attempts))
+            config.MaxAttempts = Math.Clamp(attempts, 1, 100);
+        if (int.TryParse(windowMinutes, out var minutes))
+            config.Window = TimeSpan.FromMinutes(Math.Clamp(minutes, 1, 60 * 24));
+        return config;
     }
 }
 
@@ -39,64 +37,61 @@ public sealed class FailureRateLimiter
     private const string KeyPrefix = "login:";
 
     private readonly RateLimiterConfig _config;
-    private readonly ConcurrentHashMap<string, java.util.ArrayDeque<DateTimeOffset>> _failures = new();
+    private readonly ConcurrentDictionary<string, ConcurrentQueue<DateTimeOffset>> _failures = new();
 
     public FailureRateLimiter(RateLimiterConfig config) => _config = config;
 
     public string KeyFor(string pharmacyCode, string username)
-        => KeyPrefix + pharmacyCode + ":" + username.ToLower();
+        => KeyPrefix + pharmacyCode + ":" + username.ToLowerInvariant();
 
     /// <summary>True when the caller is currently blocked (≥ MaxAttempts in window).</summary>
-    public bool IsBlocked(string key)
-        => IsBlocked(key, DateTimeOffset.now());
+    public bool IsBlocked(string key) => IsBlocked(key, DateTimeOffset.UtcNow);
 
     public bool IsBlocked(string key, DateTimeOffset now)
     {
-        var deque = _failures.Get(key);
-        if (deque is null)
+        if (!_failures.TryGetValue(key, out var failures))
             return false;
-        Prune(deque, now);
-        if (deque.IsEmpty())
+
+        Prune(failures, now);
+        if (failures.IsEmpty)
         {
-            _failures.Remove(key, deque);
+            _failures.TryRemove(key, out _);
             return false;
         }
-        return deque.Count >= _config.MaxAttempts;
+        return failures.Count >= _config.MaxAttempts;
     }
 
-    public void RecordFailure(string key)
-        => RecordFailure(key, DateTimeOffset.now());
+    public void RecordFailure(string key) => RecordFailure(key, DateTimeOffset.UtcNow);
 
     public void RecordFailure(string key, DateTimeOffset now)
     {
-        var deque = _failures.ComputeIfAbsent(key, _ => new java.util.ArrayDeque<DateTimeOffset>());
-        Prune(deque, now);
-        deque.AddLast(now);
-        if (deque.Count > _config.MaxAttempts * 4)      // bound: drop the oldest half
+        var failures = _failures.GetOrAdd(key, _ => new ConcurrentQueue<DateTimeOffset>());
+        Prune(failures, now);
+        failures.Enqueue(now);
+
+        // Bound the bucket: keep the newest MaxAttempts entries once it grows.
+        while (failures.Count > _config.MaxAttempts * 4 && failures.TryDequeue(out _))
         {
-            for (var i = 0; i < deque.Count / 2; i++) deque.RemoveFirst();
         }
     }
 
     /// <summary>Call after a successful login so the bucket starts clean.</summary>
-    public void Reset(string key) => _failures.Remove(key);
+    public void Reset(string key) => _failures.TryRemove(key, out _);
 
     public int RecentFailures(string key, DateTimeOffset now)
     {
-        var deque = _failures.Get(key);
-        if (deque is null)
+        if (!_failures.TryGetValue(key, out var failures))
             return 0;
-        Prune(deque, now);
-        return deque.Count;
+        Prune(failures, now);
+        return failures.Count;
     }
 
-    // Analysing a window of up to a couple of minutes of failures needs a
-    // wall-clock threshold; using the configured window relative to the fresh
-    // `now` above is sufficient and keeps the bucket bounded.
-    private void Prune(java.util.ArrayDeque<DateTimeOffset> deque, DateTimeOffset now)
+    // Drop attempts that fell out of the sliding window. Callers serialise per
+    // key only implicitly, which is fine: pruning is monotonic and idempotent.
+    private void Prune(ConcurrentQueue<DateTimeOffset> failures, DateTimeOffset now)
     {
-        var windowNanos = _config.Window.toNanos();
-        while (!deque.IsEmpty() && now.toEpochSecond() * 1_000_000_000 - deque.PeekFirst().toEpochSecond() * 1_000_000_000 > windowNanos)
-            deque.RemoveFirst();
+        var threshold = now - _config.Window;
+        while (failures.TryPeek(out var oldest) && oldest <= threshold)
+            failures.TryDequeue(out _);
     }
 }

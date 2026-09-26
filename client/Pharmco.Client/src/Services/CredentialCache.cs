@@ -1,6 +1,7 @@
 namespace Pharmco.Client.Services;
 
-using java.sql;
+using System.IO;
+using Microsoft.Data.Sqlite;
 using Pharmco.Client.Models;
 
 /// <summary>
@@ -12,26 +13,26 @@ using Pharmco.Client.Models;
 ///   * last_verified_at (epoch seconds) — the 7-day online-freshness gate
 ///
 /// SQLCipher delivery: on Windows the app ships the SQLCipher build of the
-/// JDBC SQLite driver and opens with <c>PRAGMA key = "x'&lt;256-bit hex&gt;'"</c>
+/// SQLite native library and opens with <c>PRAGMA key = "x'&lt;256-bit hex&gt;'"</c>
 /// (raw-key form, AES-256). The key itself never touches disk in clear — it is
-/// DPAPI-wrapped by SecretsBox. The bare JDBC driver without cipher support is
-/// DEV-only: set PHARMCO_PLAINTEXT_SQLITE=1 to disable the PRAGMA (never ship
+/// DPAPI-wrapped by SecretsBox. The plain SQLite provider without cipher support
+/// is DEV-only: set PHARMCO_PLAINTEXT_SQLITE=1 to disable the PRAGMA (never ship
 /// or run pilots with that).
 /// </summary>
 public sealed class CredentialCache
 {
-    private static const string Ddl =
+    private const string Ddl =
         "CREATE TABLE IF NOT EXISTS credential_cache (" +
         "  id                INTEGER PRIMARY KEY AUTOINCREMENT," +
         "  pharmacy_code     TEXT    NOT NULL," +
         "  username          TEXT    NOT NULL," +
-        "  password_hash     TEXT    NOT NULL," +       // client-side bcrypt (cost 12)
+        "  password_hash     TEXT    NOT NULL," +   // client-side bcrypt (cost 12)
         "  role              TEXT    NOT NULL," +
         "  tenant_code       TEXT    NOT NULL," +
         "  user_id           TEXT    NOT NULL," +
-        "  access_token      BLOB    NOT NULL," +       // DPAPI-wrapped
-        "  refresh_token     BLOB," +                   // DPAPI-wrapped
-        "  last_verified_at  INTEGER NOT NULL," +       // epoch seconds (UTC)
+        "  access_token      BLOB    NOT NULL," +   // SecretsBox-wrapped
+        "  refresh_token     BLOB," +               // SecretsBox-wrapped
+        "  last_verified_at  INTEGER NOT NULL," +   // epoch seconds (UTC)
         "  created_at        INTEGER NOT NULL," +
         "  updated_at        INTEGER NOT NULL," +
         "  UNIQUE (pharmacy_code, username)" +
@@ -50,18 +51,17 @@ public sealed class CredentialCache
     public static CredentialCache OpenDefault()
     {
         var keyPath = ConfigDir.DataPath("credentials.db.key");
-        var keyFile = new java.io.File(keyPath);
         string keyHex;
-        if (keyFile.exists())
-            keyHex = SecretsBox.UnprotectString(java.nio.file.Files.readAllBytes(keyFile.toPath()));
+        if (File.Exists(keyPath))
+            keyHex = SecretsBox.UnprotectString(File.ReadAllBytes(keyPath));
         else
         {
             keyHex = SecretsBox.RandomHex(32);
-            keyFile.getParentFile().mkdirs();
-            java.nio.file.Files.write(keyFile.toPath(), SecretsBox.Protect(keyHex));
+            Directory.CreateDirectory(Path.GetDirectoryName(keyPath)!);
+            File.WriteAllBytes(keyPath, SecretsBox.Protect(keyHex));
         }
 
-        var plaintext = java.lang.System.getenv("PHARMCO_PLAINTEXT_SQLITE") == "1";
+        var plaintext = Environment.GetEnvironmentVariable("PHARMCO_PLAINTEXT_SQLITE") == "1";
         return new CredentialCache(
             ConfigDir.DataPath("credentials.db"),
             plaintext ? "" : keyHex);
@@ -71,159 +71,156 @@ public sealed class CredentialCache
 
     public CachedCredential? Find(string pharmacyCode, string username)
     {
-        var conn = Open();
-        try
-        {
-            try (var st = conn.prepareStatement(
-                "SELECT pharmacy_code, username, password_hash, role, tenant_code, user_id, " +
-                "access_token, refresh_token, last_verified_at FROM credential_cache " +
-                "WHERE pharmacy_code = ? AND lower(username) = lower(?)"))
-            {
-                st.setString(1, pharmacyCode);
-                st.setString(2, username);
-                try (var rs = st.executeQuery())
-                {
-                    if (!rs.next())
-                        return null;
-                    return MapRow(rs);
-                }
-            }
-        }
-        finally { conn.Close(); }
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT pharmacy_code, username, password_hash, role, tenant_code, user_id, " +
+            "access_token, refresh_token, last_verified_at FROM credential_cache " +
+            "WHERE pharmacy_code = @pharmacy_code AND lower(username) = lower(@username)";
+        cmd.Parameters.AddWithValue("@pharmacy_code", pharmacyCode);
+        cmd.Parameters.AddWithValue("@username", username);
+
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? MapRow(reader) : null;
     }
 
     public void Save(CachedCredential c)
     {
-        var now = DateTimeOffset.now().toEpochSecond();
-        RunUpdate(
-            "INSERT INTO credential_cache " +
-            "(pharmacy_code, username, password_hash, role, tenant_code, user_id, " +
-            " access_token, refresh_token, last_verified_at, created_at, updated_at) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-            "ON CONFLICT(pharmacy_code, username) DO UPDATE SET " +
-            " password_hash = excluded.password_hash, role = excluded.role, " +
-            " tenant_code = excluded.tenant_code, user_id = excluded.user_id, " +
-            " access_token = excluded.access_token, refresh_token = excluded.refresh_token, " +
-            " last_verified_at = excluded.last_verified_at, updated_at = excluded.updated_at",
-            st =>
-            {
-                st.setString(1, c.PharmacyCode);
-                st.setString(2, c.Username.ToLower());
-                st.setString(3, c.PasswordHash);
-                st.setString(4, c.Role);
-                st.setString(5, c.TenantCode);
-                st.setString(6, c.UserId);
-                st.setBytes(7, SecretsBox.Protect(c.AccessToken));
-                if (c.RefreshToken.IsEmpty()) st.setNull(8, Types.BLOB);
-                else st.setBytes(8, SecretsBox.Protect(c.RefreshToken));
-                st.setLong(9, c.LastVerifiedAt.toEpochSecond());
-                st.setLong(10, now);
-                st.setLong(11, now);
-            });
+        // Idempotent INSERT (ON CONFLICT DO UPDATE) — the UNIQUE (pharmacy_code, username)
+        // row and the absolute clock ("last write wins") keep re-login deterministic.
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "INSERT INTO credential_cache (access_token, refresh_token, pharmacy_code, username, " +
+            "password_hash, role, tenant_code, user_id, last_verified_at, created_at, updated_at) " +
+            "VALUES (@access_token, @refresh_token, @pharmacy_code, @username, " +
+            "@password_hash, @role, @tenant_code, @user_id, @last_verified_at, @created_at, @updated_at) " +
+            "ON CONFLICT (pharmacy_code, username) DO UPDATE SET " +
+            "access_token = excluded.access_token, refresh_token = excluded.refresh_token, " +
+            "password_hash = excluded.password_hash, role = excluded.role, " +
+            "tenant_code = excluded.tenant_code, user_id = excluded.user_id, " +
+            "last_verified_at = excluded.last_verified_at, updated_at = excluded.updated_at";
+        BindToken(cmd, "@access_token", c.AccessToken);
+        BindToken(cmd, "@refresh_token", c.RefreshToken);
+        cmd.Parameters.AddWithValue("@pharmacy_code", c.PharmacyCode);
+        cmd.Parameters.AddWithValue("@username", c.Username);
+        cmd.Parameters.AddWithValue("@password_hash", c.PasswordHash);
+        cmd.Parameters.AddWithValue("@role", c.Role);
+        cmd.Parameters.AddWithValue("@tenant_code", c.TenantCode);
+        cmd.Parameters.AddWithValue("@user_id", c.UserId);
+        cmd.Parameters.AddWithValue("@last_verified_at", c.LastVerifiedAt.ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("@created_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("@updated_at", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        cmd.ExecuteNonQuery();
     }
 
     public void UpdateVerifiedAt(string pharmacyCode, string username, DateTimeOffset at)
     {
         RunUpdate(
-            "UPDATE credential_cache SET last_verified_at = ?, updated_at = ? " +
-            "WHERE pharmacy_code = ? AND lower(username) = lower(?)",
-            st =>
+            "UPDATE credential_cache SET last_verified_at = @last_verified_at, updated_at = @now " +
+            "WHERE pharmacy_code = @pharmacy_code AND lower(username) = lower(@username)",
+            cmd =>
             {
-                st.setLong(1, at.toEpochSecond());
-                st.setLong(2, DateTimeOffset.now().toEpochSecond());
-                st.setString(3, pharmacyCode);
-                st.setString(4, username);
+                cmd.Parameters.AddWithValue("@last_verified_at", at.ToUnixTimeSeconds());
+                cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                cmd.Parameters.AddWithValue("@pharmacy_code", pharmacyCode);
+                cmd.Parameters.AddWithValue("@username", username);
             });
     }
 
     public void UpdateTokens(string pharmacyCode, string username, string accessToken, string refreshToken)
     {
         RunUpdate(
-            "UPDATE credential_cache SET access_token = ?, refresh_token = ?, updated_at = ? " +
-            "WHERE pharmacy_code = ? AND lower(username) = lower(?)",
-            st =>
+            "UPDATE credential_cache SET access_token = @access_token, refresh_token = @refresh_token, " +
+            "updated_at = @now WHERE pharmacy_code = @pharmacy_code AND lower(username) = lower(@username)",
+            cmd =>
             {
-                st.setBytes(1, SecretsBox.Protect(accessToken));
-                if (refreshToken.IsEmpty()) st.setNull(2, Types.BLOB);
-                else st.setBytes(2, SecretsBox.Protect(refreshToken));
-                st.setLong(3, DateTimeOffset.now().toEpochSecond());
-                st.setString(4, pharmacyCode);
-                st.setString(5, username);
+                BindToken(cmd, "@access_token", accessToken);
+                BindToken(cmd, "@refresh_token", refreshToken);
+                cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                cmd.Parameters.AddWithValue("@pharmacy_code", pharmacyCode);
+                cmd.Parameters.AddWithValue("@username", username);
             });
     }
 
     public void Delete(string pharmacyCode, string username)
     {
         RunUpdate(
-            "DELETE FROM credential_cache WHERE pharmacy_code = ? AND lower(username) = lower(?)",
-            st =>
+            "DELETE FROM credential_cache WHERE pharmacy_code = @pharmacy_code AND lower(username) = lower(@username)",
+            cmd =>
             {
-                st.setString(1, pharmacyCode);
-                st.setString(2, username);
+                cmd.Parameters.AddWithValue("@pharmacy_code", pharmacyCode);
+                cmd.Parameters.AddWithValue("@username", username);
             });
     }
 
     /// <summary>Logout clears the WHOLE cache (spec: "Logout clears cache").</summary>
     public void Clear()
     {
-        RunUpdate("DELETE FROM credential_cache", st => { /* no params */ });
+        RunUpdate("DELETE FROM credential_cache", _ => { /* no params */ });
     }
 
     // --- internals -----------------------------------------------------------------
 
-    private interface Binder { void Bind(java.sql.PreparedStatement st); }
-
-    private void RunUpdate(string sql, Binder binder)
+    private void RunUpdate(string sql, Action<SqliteCommand> bind)
     {
-        var conn = Open();
-        try
-        {
-            try (var st = conn.prepareStatement(sql))
-            {
-                binder.Bind(st);
-                st.executeUpdate();
-            }
-            conn.Commit();
-        }
-        finally { conn.Close(); }
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        bind(cmd);
+        cmd.ExecuteNonQuery();
     }
 
-    private Connection Open()
+    private SqliteConnection Open()
     {
-        var conn = DriverManager.getConnection("jdbc:sqlite:" + _dbPath);
+        var conn = new SqliteConnection("Data Source=" + _dbPath);
+        conn.Open();
         try
         {
-            if (!_sqlCipherKeyHex.IsEmpty())
-            {
-                try (var st = conn.createStatement())
-                    st.execute("PRAGMA key = \"x'" + _sqlCipherKeyHex + "'\"");
-            }
-            try (var st = conn.createStatement())
-                st.execute(Ddl);
+            if (!string.IsNullOrEmpty(_sqlCipherKeyHex))
+                Execute(conn, "PRAGMA key = \"x'" + _sqlCipherKeyHex + "'\"");
+            Execute(conn, Ddl);
             return conn;
         }
-        catch (Throwable t)
+        catch
         {
-            conn.Close();
-            throw t;
+            conn.Dispose();
+            throw;
         }
     }
 
-    private CachedCredential MapRow(java.sql.ResultSet rs) throws java.sql.SQLException
+    private static void Execute(SqliteConnection conn, string sql)
     {
-        var access = rs.getBytes("access_token");
-        var refresh = rs.getBytes("refresh_token");
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Wraps a token for storage; empty ⇒ NULL (the column is nullable).</summary>
+    private static void BindToken(SqliteCommand cmd, string name, string token)
+    {
+        if (string.IsNullOrEmpty(token))
+            cmd.Parameters.AddWithValue(name, DBNull.Value);
+        else
+            cmd.Parameters.AddWithValue(name, SecretsBox.Protect(token));
+    }
+
+    private static CachedCredential MapRow(SqliteDataReader reader)
+    {
+        var access = reader.IsDBNull(6) ? null : reader.GetFieldValue<byte[]>(6);
+        var refresh = reader.IsDBNull(7) ? null : reader.GetFieldValue<byte[]>(7);
         return new CachedCredential
         {
-            PharmacyCode = rs.getString("pharmacy_code"),
-            Username = rs.getString("username"),
-            PasswordHash = rs.getString("password_hash"),
-            Role = rs.getString("role"),
-            TenantCode = rs.getString("tenant_code"),
-            UserId = rs.getString("user_id"),
+            PharmacyCode = reader.GetString(0),
+            Username = reader.GetString(1),
+            PasswordHash = reader.GetString(2),
+            Role = reader.GetString(3),
+            TenantCode = reader.GetString(4),
+            UserId = reader.GetString(5),
             AccessToken = access is null ? "" : SecretsBox.UnprotectString(access),
             RefreshToken = refresh is null ? "" : SecretsBox.UnprotectString(refresh),
-            LastVerifiedAt = DateTimeOffset.ofEpochSecond(rs.getLong("last_verified_at"), ZoneOffset.UTC),
+            LastVerifiedAt = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(8)),
         };
     }
 }
+

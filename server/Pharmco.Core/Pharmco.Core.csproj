@@ -22,6 +22,21 @@
     <EmbeddedResource Include="../../db/tenant/002_tenant_template.sql">
       <LogicalName>Pharmco.Core.Db.002_tenant_template.sql</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="../../db/master/003_refresh_tokens.sql">
+      <LogicalName>Pharmco.Core.Db.003_refresh_tokens.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../db/tenant/004_tenant_products.sql">
+      <LogicalName>Pharmco.Core.Db.004_tenant_products.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../db/tenant/005_tenant_sales.sql">
+      <LogicalName>Pharmco.Core.Db.005_tenant_sales.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../db/master/006_daraja.sql">
+      <LogicalName>Pharmco.Core.Db.006_daraja.sql</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../db/tenant/007_sync_queue.sql">
+      <LogicalName>Pharmco.Core.Db.007_sync_queue.sql</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

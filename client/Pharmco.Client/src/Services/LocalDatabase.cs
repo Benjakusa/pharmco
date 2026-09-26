@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Pharmco.Client.Models;
+using Pharmco.Core.Sales;
 
 namespace Pharmco.Client.Services;
 

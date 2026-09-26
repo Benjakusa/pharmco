@@ -18,6 +18,8 @@ public sealed record InFlightSale
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid TenantId { get; init; }
     public Guid CashierUserId { get; init; }
+    /// <summary>Client-assigned invoice number (PH-&lt;tenant&gt;-&lt;day&gt;-&lt;seq&gt;).</summary>
+    public string InvoiceNo { get; init; } = "";
     public string? CustomerPhone { get; init; }
     public PaymentMode PaymentMode { get; init; } = PaymentMode.Cash;
     public string? MpesaRef { get; init; }

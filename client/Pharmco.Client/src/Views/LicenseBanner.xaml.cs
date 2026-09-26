@@ -1,13 +1,12 @@
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Extensions.DependencyInjection;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client.Views;
 
 public partial class LicenseBanner : UserControl
 {
-    private LicenseEnforcementService? _enforcementService;
-
     public static readonly DependencyProperty LicenseStateProperty =
         DependencyProperty.Register(
             nameof(LicenseState),
@@ -56,10 +55,14 @@ public partial class LicenseBanner : UserControl
 
     private void RenewButton_Click(object sender, RoutedEventArgs e)
     {
-        // Open renewal dialog
-        var dialog = new RenewDialog
+        // Open renewal dialog (services come from the app container — the dialog
+        // needs the enforcement service, sync engine and local database).
+        var dialog = new RenewDialog(
+            App.Services.GetRequiredService<LicenseEnforcementService>(),
+            App.Services.GetRequiredService<SyncEngine>(),
+            App.Services.GetRequiredService<LocalDatabase>())
         {
-            Owner = Window.GetWindow(this)
+            Owner = Window.GetWindow(this),
         };
         dialog.ShowDialog();
     }

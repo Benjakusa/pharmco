@@ -1,4 +1,6 @@
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
+using Pharmco.Client.Models;
 using Pharmco.Client.Services;
 using Pharmco.Client.Views;
 

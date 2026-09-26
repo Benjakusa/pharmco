@@ -6,6 +6,7 @@ using Npgsql;
 using Pharmco.Api.Middleware;
 using Pharmco.Api.Services;
 using Pharmco.Core.Auth;
+using Pharmco.Core.Data;
 using Pharmco.Core.Licensing;
 using Pharmco.Core.Tenants;
 
@@ -24,7 +25,8 @@ public static class LicenseEndpoints
         NpgsqlConnectionFactory connectionFactory,
         JwtService jwt)
     {
-        if (var denied = Authz.RequireAdmin(http); denied is not null)
+        var denied = Authz.RequireAdmin(http);
+        if (denied is not null)
             return denied;
 
         var claims = Authz.Claims(http, jwt);
@@ -67,8 +69,8 @@ public static class LicenseEndpoints
         }, statusCode: StatusCodes.Status202Accepted);
     }
 
-    private static ILogger<LicenseEndpoints>? _logger;
-    public static void SetLogger(ILogger<LicenseEndpoints> logger) => _logger = logger;
+    private static ILogger<ApiLog>? _logger;
+    public static void SetLogger(ILogger<ApiLog> logger) => _logger = logger;
 
     private static IResult Error(string code, string message, int statusCode)
         => Results.Json(new { error = new { code, message } }, statusCode: statusCode);

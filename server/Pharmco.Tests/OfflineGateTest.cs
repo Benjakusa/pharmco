@@ -1,7 +1,7 @@
-import xunit.*;
-
+using Xunit;
 using Pharmco.Core.Auth;
-using java.time;
+
+namespace Pharmco.Tests;
 
 /// <summary>
 /// Offline-login policy tests (the WPF SessionManager delegates its offline
@@ -17,9 +17,9 @@ public class OfflineGateTest
         var now = T(1_700_000_000L);
         var verdict = OfflineGate.Evaluate(Fact(now, offsetSeconds: -2L * 86_400), Password, now);
 
-        assertTrue(verdict.Allowed);
-        assertEq("none", verdict.Reason);
-        assertTrue(!verdict.Stale);
+        Assert.True(verdict.Allowed);
+        Assert.Equal("none", verdict.Reason);
+        Assert.False(verdict.Stale);
     }
 
     [Fact]
@@ -28,9 +28,9 @@ public class OfflineGateTest
         var now = T(1_700_000_000L);
         var verdict = OfflineGate.Evaluate(Fact(now, offsetSeconds: -10L * 86_400), Password, now);
 
-        assertTrue(!verdict.Allowed);
-        assertTrue(verdict.Stale);                    // last_verified_at older than 7 days
-        assertEq("cache_stale", verdict.Reason);      // → require online login
+        Assert.False(verdict.Allowed);
+        Assert.True(verdict.Stale);                   // last_verified_at older than 7 days
+        Assert.Equal("cache_stale", verdict.Reason);  // → require online login
     }
 
     [Fact]
@@ -39,8 +39,8 @@ public class OfflineGateTest
         var now = T(1_700_000_000L);
         var verdict = OfflineGate.Evaluate(Fact(now, offsetSeconds: -86_400), "wrong-password", now);
 
-        assertTrue(!verdict.Allowed);
-        assertEq("invalid_password", verdict.Reason);
+        Assert.False(verdict.Allowed);
+        Assert.Equal("invalid_password", verdict.Reason);
     }
 
     [Fact]
@@ -48,20 +48,20 @@ public class OfflineGateTest
     {
         var verdict = OfflineGate.Evaluate(null, Password, T(1_700_000_000L));
 
-        assertTrue(!verdict.Allowed);
-        assertTrue(verdict.CacheMissing);
+        Assert.False(verdict.Allowed);
+        Assert.True(verdict.CacheMissing);
     }
 
     // --- fixtures -----------------------------------------------------------------
 
     private static CachedCredentialFacts Fact(DateTimeOffset now, long offsetSeconds)
-        => new CachedCredentialFacts
-           {
-               Username = "admin@nairobi-chemist",
-               PasswordHash = PasswordService.Hash(Password),   // client-side second hash, cost 12
-               LastVerifiedAt = T(now.toEpochSecond() + offsetSeconds),
-           };
+        => new()
+        {
+            Username = "admin@nairobi-chemist",
+            PasswordHash = PasswordService.Hash(Password),   // client-side second hash, cost 12
+            LastVerifiedAt = DateTimeOffset.FromUnixTimeSeconds(now.ToUnixTimeSeconds() + offsetSeconds),
+        };
 
     private static DateTimeOffset T(long epochSeconds)
-        => DateTimeOffset.ofEpochSecond(epochSeconds, ZoneOffset.UTC);
+        => DateTimeOffset.FromUnixTimeSeconds(epochSeconds);
 }

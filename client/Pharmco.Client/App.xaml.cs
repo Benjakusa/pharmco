@@ -43,7 +43,7 @@ public partial class App : Application
         // Start sync engine
         var syncEngine = Services.GetRequiredService<SyncEngine>();
         var syncCts = new System.Threading.CancellationTokenSource();
-        syncEngine.StartAsync(syncCts.Token);
+        await syncEngine.StartAsync(syncCts.Token);
 
         // Load cached license
         var licenseService = Services.GetRequiredService<LicenseEnforcementService>();
