@@ -11,6 +11,11 @@ plus the implemented auth subsystem (JWT login/refresh, admin user management,
 WPF credential cache with offline login + auto-lock — see `docs/api-contract.md`
 and `client/Pharmco.Client/README.md`).
 
+The API now includes a small browser preview served from its `wwwroot` folder
+(sign-in, inventory visibility, and admin team accounts). It is not a complete
+browser POS; sales checkout remains unfinished. Open `Pharmco.sln` in Visual
+Studio on Windows and run `Pharmco.Api` to launch the preview in Chrome.
+
 ## Layout
 
 ```

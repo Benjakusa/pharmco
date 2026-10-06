@@ -20,6 +20,17 @@ var connectionString = builder.Configuration["ConnectionStrings:Master"]
     ?? throw new InvalidOperationException("ConnectionStrings__Master (or appsettings 'ConnectionStrings:Master') is required");
 var jwtSecret = builder.Configuration["Jwt:Secret"]
     ?? throw new InvalidOperationException("Jwt:Secret is required");
+if (builder.Environment.IsProduction()
+    && (jwtSecret.Length < 32 || jwtSecret.StartsWith("dev-only-", StringComparison.Ordinal)))
+{
+    throw new InvalidOperationException("Production requires Jwt:Secret to be a non-development secret of at least 32 characters.");
+}
+if (builder.Environment.IsProduction())
+{
+    var darajaKey = builder.Configuration["Daraja:EncryptionKey"]
+        ?? throw new InvalidOperationException("Production requires Daraja:EncryptionKey.");
+    _ = new Pharmco.Core.Security.DarajaEncryption(darajaKey);
+}
 
 // --- JSON: the wire format is snake_case everywhere (docs/api-contract.md) ----
 // Request DTO properties are PascalCase in C#; without this policy
@@ -44,7 +55,7 @@ builder.Services.AddSingleton<DarajaService>();
 // License signing/verification key (RSA-2048). The API must use the SAME keypair
 // the provisioning CLI signs with (License__PrivateKeyPath), otherwise the
 // /api/sync/pull license block and any license verification cannot work.
-builder.Services.AddSingleton(CreateLicenseService(builder.Configuration));
+builder.Services.AddSingleton(CreateLicenseService(builder.Configuration, builder.Environment.IsProduction()));
 
 // JWT (HS256) — the hand-rolled signer/verifier and the framework JwtBearer
 // filter share the same secret, issuer and audience, so either path validates
@@ -85,6 +96,11 @@ builder.Services.AddRequestDecompression();
 builder.Services.AddHostedService<PendingVerificationJob>();
 
 var app = builder.Build();
+
+// Serve the browser client from wwwroot at the same origin as the API. This
+// keeps browser API calls same-origin and avoids a separate frontend toolchain.
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 // Static endpoint classes keep an optional logger; wire it from the container so
 // their diagnostics are not silently dropped.
@@ -160,7 +176,7 @@ app.Run();
 // License__PrivateKey (inline PEM). Falls back to an ephemeral key with a loud
 // warning so a misconfigured deployment is obvious instead of silently unable
 // to verify tenant licenses.
-static LicenseService CreateLicenseService(IConfiguration configuration)
+static LicenseService CreateLicenseService(IConfiguration configuration, bool isProduction)
 {
     var path = configuration["License:PrivateKeyPath"];
     if (!string.IsNullOrWhiteSpace(path))
@@ -174,9 +190,10 @@ static LicenseService CreateLicenseService(IConfiguration configuration)
     if (!string.IsNullOrWhiteSpace(inline))
         return new LicenseService(LicenseService.LoadPrivateKey(inline));
 
-    Console.Error.WriteLine(
-        "WARNING: License:PrivateKeyPath is not set — using an ephemeral RSA key. " +
-        "Tenant license verification will fail until the signing key is configured.");
+    if (isProduction)
+        throw new InvalidOperationException("Production requires License:PrivateKeyPath or License:PrivateKey; an ephemeral key cannot verify provisioned licenses.");
+
+    Console.Error.WriteLine("WARNING: License:PrivateKeyPath is not set — using an ephemeral development RSA key.");
     return new LicenseService(RSA.Create(2048));
 }
 

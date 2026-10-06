@@ -41,6 +41,7 @@ public static class DarajaConfigEndpoints
         HttpContext http,
         DarajaConfigRequestDto body,
         DarajaService daraja,
+        IConfiguration configuration,
         ILogger<ApiLog> logger)
     {
         var denied = Authz.RequireAdmin(http);
@@ -75,7 +76,7 @@ public static class DarajaConfigEndpoints
         if (claims is null)
             return Error("unauthorized", "invalid token", StatusCodes.Status401Unauthorized);
 
-        var encryptionKey = Environment.GetEnvironmentVariable("Daraja__EncryptionKey")
+        var encryptionKey = configuration["Daraja:EncryptionKey"]
             ?? throw new InvalidOperationException("Daraja__EncryptionKey environment variable is not set");
 
         var encryption = new DarajaEncryption(encryptionKey);

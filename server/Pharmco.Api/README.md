@@ -12,6 +12,21 @@ dotnet run                 # serves GET /health on :8080
 dotnet test                # from ../Pharmco.Tests
 ```
 
+## Browser preview (Windows / Visual Studio)
+
+The API project serves its browser interface from `wwwroot`; no Node.js or
+separate frontend build is needed. Open `Pharmco.sln`, set `Pharmco.Api` as the
+startup project, and run the `Pharmco.Api` profile. Visual Studio opens
+`http://localhost:5086` in the browser. The preview provides sign-in, inventory
+visibility, and admin team account management. Sales checkout is not part of
+this preview yet.
+
+The API needs a local PostgreSQL database with the master schema and at least
+one active tenant/user before sign-in will succeed. The default development
+connection string targets `localhost:5432`, database/user/password `pharmco`.
+Set `ConnectionStrings__Master` through Visual Studio's environment variables
+or User Secrets if your local database uses different values.
+
 ## Layout
 | Path            | Role |
 |-----------------|------|

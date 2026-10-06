@@ -7,7 +7,7 @@ ENV_FILE="$(dirname "$0")/../.env"
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE — copy .env.example to .env first" >&2; exit 1; }
 
 gen() { openssl rand -base64 48 | tr -d '\n='; }   # ~48 bytes of charset-safe entropy
-gen32() { openssl rand -hex 32; }
+gen32() { openssl rand -base64 32 | tr -d '\n'; }
 
 # Preserve comments; only replace the four secret values.
 sed -i \

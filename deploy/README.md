@@ -15,6 +15,10 @@ turn the orange cloud ON afterwards.
 ssh root@your-vps-ip
 git clone https://your-git-host/pharmco.git /opt/pharmco && cd /opt/pharmco/deploy
 cp .env.example .env && ./scripts/gen-env.sh     # fills strong secrets, chmod 600
+mkdir -p secrets && chmod 700 secrets
+# Generate once; retain this private key for API restarts and provisioning.
+dotnet run --project ../server/Pharmco.Cli -- gen-keys --out-dir ./secrets
+chmod 600 secrets/license_private.pem
 docker compose up -d --build                      # api + postgres + redis + caddy
 docker compose ps                                  # all healthy?
 ```
@@ -30,6 +34,11 @@ may take seconds for issuance.
 > # later per release:
 > scp -r ./client-publish/* root@vps:/opt/pharmco/client-publish/
 > ```
+>
+> Keep `deploy/secrets/license_private.pem` persistent and restricted to the
+> API/provisioning operator. The API refuses to start in Production without
+> this key and a non-development JWT secret. Embed the matching public key in
+> the desktop client before provisioning production tenants.
 
 ### `db` first-boot behavior
 The `db/master/*.sql` chain is mounted into `/docker-entrypoint-initdb.d/`

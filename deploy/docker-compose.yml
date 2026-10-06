@@ -21,8 +21,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Master: Host=db;Database=pharmco;Username=pharmco;Password=${DB_PASS:?set DB_PASS in .env}
       Jwt__Secret: ${JWT_SECRET:?set JWT_SECRET in .env}
-      Jwt__AdminKey: ${ADMIN_KEY:?set ADMIN_KEY in .env}
+      Jwt__AdminKey: ${JWT_ADMIN_KEY:?set JWT_ADMIN_KEY in .env}
       Daraja__EncryptionKey: ${DARAJA_ENC_KEY:?set DARAJA_ENC_KEY in .env}
+      License__PrivateKeyPath: /run/secrets/license_private.pem
+    volumes:
+      - ./secrets/license_private.pem:/run/secrets/license_private.pem:ro
     depends_on:
       db:
         condition: service_healthy
