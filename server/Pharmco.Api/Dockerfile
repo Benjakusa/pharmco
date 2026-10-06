@@ -1,14 +1,20 @@
 # ------------------------------------------------------------------------------
 # PHARMCO API container — multi-stage .NET 8 build.
-# Build:  docker build -t pharmco/api:latest -f Pharmco.Api/Dockerfile .
-# (referenced by deploy/docker-compose.yml as build context ../server)
+# Build:  docker build -t pharmco/api:latest -f server/Pharmco.Api/Dockerfile .
+# The repository root is the context so the Core project and embedded SQL
+# migrations under db/ are available to MSBuild.
 # ------------------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /build
-COPY Pharmco.Api/Pharmco.Api.csproj Pharmco.Api/
-RUN dotnet restore Pharmco.Api/Pharmco.Api.csproj
-COPY Pharmco.Api/ Pharmco.Api/
-RUN dotnet publish Pharmco.Api/Pharmco.Api.csproj -c Release -o /out --no-restore
+COPY Directory.Build.props .
+COPY server/Directory.Build.props server/Directory.Build.props
+COPY server/Pharmco.Api/Pharmco.Api.csproj server/Pharmco.Api/
+COPY server/Pharmco.Core/Pharmco.Core.csproj server/Pharmco.Core/
+RUN dotnet restore server/Pharmco.Api/Pharmco.Api.csproj
+COPY server/Pharmco.Api/ server/Pharmco.Api/
+COPY server/Pharmco.Core/ server/Pharmco.Core/
+COPY db/ db/
+RUN dotnet publish server/Pharmco.Api/Pharmco.Api.csproj -c Release -o /out --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 # the aspnet image has no curl/wget by default; the compose healthcheck needs

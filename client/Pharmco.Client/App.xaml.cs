@@ -1,6 +1,7 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client;
@@ -27,7 +28,12 @@ public partial class App : Application
                 services.AddSingleton(new LocalDatabase(dbPath, encryptionKey));
 
                 // Sync engine
-                services.AddSingleton<SyncEngine>();
+                var apiBaseUrl = Environment.GetEnvironmentVariable("PHARMCO_API_URL")
+                    ?? "https://api.pharmco.co.ke";
+                services.AddSingleton(sp => new SyncEngine(
+                    sp.GetRequiredService<LocalDatabase>(),
+                    sp.GetRequiredService<ILogger<SyncEngine>>(),
+                    apiBaseUrl));
                 services.AddSingleton<LicenseValidator>();
                 services.AddSingleton<LicenseEnforcementService>();
 

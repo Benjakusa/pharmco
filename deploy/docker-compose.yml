@@ -13,8 +13,8 @@ name: pharmco
 services:
   api:
     build:
-      context: ../server
-      dockerfile: Pharmco.Api/Dockerfile
+      context: ..
+      dockerfile: server/Pharmco.Api/Dockerfile
     image: pharmco/api:latest
     restart: unless-stopped
     environment:

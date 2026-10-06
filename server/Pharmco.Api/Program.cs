@@ -78,6 +78,8 @@ builder.Services
         };
     });
 builder.Services.AddAuthorization();
+// The desktop client gzip-compresses sync batches to keep offline queues small.
+builder.Services.AddRequestDecompression();
 
 // Background job for pending M-Pesa verification
 builder.Services.AddHostedService<PendingVerificationJob>();
@@ -126,6 +128,7 @@ app.MapDelete("/api/users/{id}", UserEndpoints.Delete).RequireAuthorization(poli
 // tenant resolver (401/403 + search_path), then endpoint execution. The tenant
 // resolver must SKIP /api/auth/login + /api/auth/refresh (no bearer present:
 // login binds the tenant from the body, refresh from the stored token row).
+app.UseRequestDecompression();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<TenantResolverMiddleware>();

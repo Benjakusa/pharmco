@@ -29,11 +29,6 @@ public static class SyncEndpoints
         JwtService jwt,
         LicenseService licenseService)
     {
-        // Require auth
-        var denied = Authz.RequireAdmin(http);
-        if (denied is not null)
-            return denied;
-
         var claims = Authz.Claims(http, jwt);
         if (claims is null)
             return Error("unauthorized", "invalid token", StatusCodes.Status401Unauthorized);
@@ -65,20 +60,27 @@ public static class SyncEndpoints
         {
             foreach (var op in body.Operations)
             {
+                // A rejected SQL statement aborts its PostgreSQL transaction.
+                // Isolate each operation so one invalid queued item does not
+                // poison the remainder of this batch.
+                await conn.ExecuteAsync("SAVEPOINT sync_operation", transaction: tx);
                 try
                 {
                     var result = await ProcessOperationAsync(
                         conn, tx, op, tenant, claims, licenseService);
+                    await conn.ExecuteAsync("RELEASE SAVEPOINT sync_operation", transaction: tx);
                     results.Add(result);
                 }
                 catch (Exception ex)
                 {
                     _logger?.LogError(ex, "Failed to process sync op {Uuid}", op.Uuid);
+                    await conn.ExecuteAsync("ROLLBACK TO SAVEPOINT sync_operation", transaction: tx);
+                    await conn.ExecuteAsync("RELEASE SAVEPOINT sync_operation", transaction: tx);
                     results.Add(new
                     {
                         uuid = op.Uuid,
                         status = "error",
-                        error = ex.Message
+                        error = "Operation could not be applied; verify its data before retrying."
                     });
                 }
             }
@@ -106,10 +108,6 @@ public static class SyncEndpoints
         JwtService jwt,
         LicenseService licenseService)
     {
-        var denied = Authz.RequireAdmin(http);
-        if (denied is not null)
-            return denied;
-
         var claims = Authz.Claims(http, jwt);
         if (claims is null)
             return Error("unauthorized", "invalid token", StatusCodes.Status401Unauthorized);
@@ -313,7 +311,7 @@ public static class SyncEndpoints
                 TenantId = tenant.Id,
                 InvoiceNo = sale.InvoiceNo,
                 DeviceId = deviceId,
-                CashierUserId = sale.CashierUserId,
+                CashierUserId = claims.UserId,
                 CustomerPhone = (object?)sale.CustomerPhone ?? DBNull.Value,
                 Total = (double)sale.TotalCents / 100.0,
                 PaymentMode = PaymentModeWire(sale.PaymentMode),

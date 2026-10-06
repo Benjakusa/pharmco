@@ -278,7 +278,7 @@ public sealed class SyncEngine : IHostedService, IDisposable
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/health");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/health");
             using var response = await _httpClient.SendAsync(request, ct);
             return response.IsSuccessStatusCode;
         }
