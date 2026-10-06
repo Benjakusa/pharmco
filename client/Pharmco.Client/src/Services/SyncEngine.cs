@@ -1,10 +1,8 @@
-using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Pharmco.Client.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -22,7 +20,6 @@ public sealed class SyncEngine : IHostedService, IDisposable
     private readonly HttpClient _httpClient;
     private readonly ILogger<SyncEngine> _logger;
     private readonly string _baseUrl;
-    private readonly string _deviceId;
     private Timer? _timer;
     private CancellationTokenSource? _cts;
     private bool _isOnline;
@@ -51,7 +48,6 @@ public sealed class SyncEngine : IHostedService, IDisposable
         _localDb = localDb;
         _logger = logger;
         _baseUrl = baseUrl.TrimEnd('/');
-        _deviceId = Environment.MachineName + "-" + Environment.UserName.GetHashCode();
 
         _httpClient = new HttpClient
         {

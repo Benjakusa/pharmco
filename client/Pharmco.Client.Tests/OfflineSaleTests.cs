@@ -1,5 +1,4 @@
 using Xunit;
-using Pharmco.Client.Models;
 using Pharmco.Client.Services;
 using Pharmco.Core.Sales;
 

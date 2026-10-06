@@ -1,7 +1,7 @@
 namespace Pharmco.Core.Sales;
 
 /// <summary>
-/// Invoice numbering per docs/data-model.md & PROMPT-3:
+/// Invoice numbering per docs/data-model.md &amp; PROMPT-3:
 ///   PH-&lt;tenant_code&gt;-&lt;YYYYMMDD&gt;-&lt;NNNN&gt;
 /// The day+seq pair is allocated atomically per tenant inside the sale
 /// transaction (sale_sequences upsert, see SaleRepository), so sequential

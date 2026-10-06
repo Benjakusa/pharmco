@@ -1,5 +1,3 @@
-using BCrypt.Net;
-
 namespace Pharmco.Core.Security;
 
 /// <summary>bcrypt hashing. Work factor 12 is baked into the contract.</summary>

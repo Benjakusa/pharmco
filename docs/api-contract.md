@@ -34,7 +34,7 @@ reports · `cashier` = sales only (no stock edit, no user mgmt).
 | POST | `/v1/admin/tenants/{code}/status` | `{ status: active\|suspended\|expired }` | `{ code, status }` | `set-status` |
 
 Provisioning (transactional, server-side): insert `tenants` row → create schema
-from `db/tenant-template` → create `users.admin` (bcrypt; temp password
+from `db/tenant` → create `users.admin` (bcrypt; temp password
 generated + returned once) → sign license claim (RSA-2048) → `tenant_events`
 row. No SMS in MVP (welcome message is delivered by the Pharmco team; SMS is
 Phase 2).

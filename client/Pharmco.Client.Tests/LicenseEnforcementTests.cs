@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Xunit;
 using Pharmco.Client.Services;
 

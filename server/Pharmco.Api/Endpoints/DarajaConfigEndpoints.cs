@@ -1,10 +1,6 @@
 namespace Pharmco.Api.Endpoints;
 
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Dapper;
-using Npgsql;
 using Pharmco.Api.Services;
 using Pharmco.Api.Services.Daraja;
 using Pharmco.Core.Security;
@@ -109,7 +105,7 @@ public static class DarajaConfigEndpoints
                     ConsumerSecretEnc = consumerSecretEnc,
                     PasskeyEnc = passkeyEnc,
                     Shortcode = body.Shortcode,
-                    ShortcodeType = body.ShortcodeType.ToLower(),
+                    ShortcodeType = shortcodeType,
                 }, commandTimeout: 30);
         }
         else
@@ -130,7 +126,7 @@ public static class DarajaConfigEndpoints
                     ConsumerSecretEnc = consumerSecretEnc,
                     PasskeyEnc = passkeyEnc,
                     Shortcode = body.Shortcode,
-                    ShortcodeType = body.ShortcodeType.ToLower(),
+                    ShortcodeType = shortcodeType,
                 }, commandTimeout: 30);
         }
 

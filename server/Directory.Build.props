@@ -1,5 +1,9 @@
 <Project>
   <!-- Shared settings for all Pharmco server projects (Core, Api, Cli, Tests). -->
+  <!-- This file shadows the repo-root Directory.Build.props for server projects,
+       so import it explicitly to inherit GenerateDocumentationFile / IDE0005 /
+       EnforceCodeStyleInBuild. -->
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
   <PropertyGroup>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

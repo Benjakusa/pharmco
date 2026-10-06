@@ -1,9 +1,4 @@
 using System.Text.Json;
-using Dapper;
-using Npgsql;
-using Pharmco.Core.Auth;
-using Pharmco.Core.Tenants;
-using static System.Math;
 
 namespace Pharmco.Core.Sales;
 

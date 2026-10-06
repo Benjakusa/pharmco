@@ -1,5 +1,4 @@
 using Xunit;
-using Pharmco.Client.Models;
 using Pharmco.Client.Services;
 using Pharmco.Core.Sales;
 
@@ -8,7 +7,7 @@ namespace Pharmco.Client.Tests;
 public class SyncEngineTests
 {
     [Fact]
-    public void OfflineSale_QueuedInSyncQueue()
+    public async Task OfflineSale_QueuedInSyncQueue()
     {
         // Arrange
         using var localDb = new LocalDatabase(":memory:");
@@ -26,7 +25,7 @@ public class SyncEngineTests
         };
 
         // Act
-        localDb.InsertSaleAsync(sale).Wait();
+        await localDb.InsertSaleAsync(sale);
         var queueCount = CountPendingOperations(localDb);
 
         // Assert

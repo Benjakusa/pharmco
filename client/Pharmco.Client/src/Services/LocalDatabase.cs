@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Pharmco.Client.Models;
@@ -17,11 +14,9 @@ public sealed class LocalDatabase : IDisposable
 {
     private readonly string _connectionString;
     private SqliteConnection? _connection;
-    private readonly string _dbPath;
 
     public LocalDatabase(string dbPath, string? encryptionKey = null)
     {
-        _dbPath = dbPath;
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,

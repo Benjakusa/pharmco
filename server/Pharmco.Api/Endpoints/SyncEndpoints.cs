@@ -1,9 +1,7 @@
 using System.Text.Json;
 using Dapper;
 using Npgsql;
-using Pharmco.Api.Middleware;
 using Pharmco.Api.Services;
-using Pharmco.Core.Auth;
 using Pharmco.Core.Data;
 using Pharmco.Core.Licensing;
 using Pharmco.Core.Sales;
@@ -363,7 +361,7 @@ public static class SyncEndpoints
         }
     }
 
-    private static async Task ProcessSaleItemOperationAsync(
+    private static Task ProcessSaleItemOperationAsync(
         NpgsqlConnection conn,
         NpgsqlTransaction tx,
         SyncOperationDto op,
@@ -371,6 +369,7 @@ public static class SyncEndpoints
     {
         // Sale items are created as part of sale sync — ignore standalone operations
         _logger?.LogDebug("Ignoring standalone sale_item sync operation");
+        return Task.CompletedTask;
     }
 
     private static async Task ProcessStockMoveOperationAsync(

@@ -1,7 +1,6 @@
 namespace Pharmco.Core.Auth;
 
 using Dapper;
-using Npgsql;
 using Pharmco.Core.Data;
 
 /// <summary>

@@ -32,7 +32,7 @@ may take seconds for issuance.
 > ```
 
 ### `db` first-boot behavior
-`db/master/001_master_schema.sql` is mounted into `/docker-entrypoint-initdb.d/`
+The `db/master/*.sql` chain is mounted into `/docker-entrypoint-initdb.d/`
 and creates the master tables automatically on an **empty volume only**. To apply
 later (schema drift) use `docker exec db psql -U pharmco pharmco -f-` (file pipes,
 `psql` from within the container) — CI is the enforcement point going forward.

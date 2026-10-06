@@ -12,9 +12,6 @@ namespace Pharmco.Client.Services;
 public sealed class LicenseValidator
 {
     private readonly RSA _publicKey;
-    private const string EmbeddedPublicKey = @"-----BEGIN PUBLIC KEY-----
-MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAN...PlACEHOLDER_KEEP_RSA_FORMAT...ewIDAQAB
------END PUBLIC KEY-----";
 
     public LicenseValidator()
     {

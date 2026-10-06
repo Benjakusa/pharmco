@@ -1,0 +1,15 @@
+<Project>
+  <!-- Repo-wide build settings (imported explicitly by server/Directory.Build.props,
+       which shadows this file for the server projects because MSBuild only
+       auto-imports the nearest Directory.Build.props). -->
+  <PropertyGroup>
+    <!-- GenerateDocumentationFile must be enabled for the compiler to report
+         IDE0005 (unused usings) during build — see dotnet/roslyn#41640.
+         XML doc comments themselves are not enforced (CS1591 suppressed). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- Apply .editorconfig severity settings (IDE0005/IDE0051/IDE0052 = warning)
+         on build, not just in the IDE. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+</Project>

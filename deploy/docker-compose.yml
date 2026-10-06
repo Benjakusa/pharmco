@@ -45,7 +45,7 @@ services:
       POSTGRES_DB: pharmco
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ../db/master:/docker-entrypoint-initdb.d:ro   # 001_master_schema.sql on first boot
+      - ../db/master:/docker-entrypoint-initdb.d:ro   # db/master/*.sql on first boot
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pharmco -d pharmco"]
       interval: 10s

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Pharmco.Client.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +12,7 @@ namespace Pharmco.Client.Services;
 /// 7-1 days: red banner on every screen
 /// 0 to -14: grace period, warning on every sale
 /// -14 to -30: read-only (sales blocked, reports work)
-/// < -30: hard lock (app won't launch past login)
+/// &lt; -30: hard lock (app won't launch past login)
 /// </summary>
 public sealed class LicenseEnforcementService : IHostedService
 {

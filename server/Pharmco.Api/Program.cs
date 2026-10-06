@@ -3,7 +3,6 @@ using System.Text;
 using Dapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.Extensions.Hosting;
 using Pharmco.Api;
 using Pharmco.Api.Endpoints;
 using Pharmco.Api.Middleware;

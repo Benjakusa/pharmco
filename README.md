@@ -17,7 +17,7 @@ and `client/Pharmco.Client/README.md`).
 docs/                    architecture + data model + API contract + runbook
 db/
   master/                master schema (tenants, users, daraja, refresh, events)
-  tenant-template/       per-tenant schema (products, sales, stock, outbox, …)
+  tenant/                per-tenant schema chain (products, sales, sync queue, …)
   scripts/               apply_tenant_schema.sh (placeholder substitution)
 deploy/                  docker-compose (api+postgres+redis+caddy), Caddyfile,
                          .env.example, gen-env.sh, backup.sh, restore.sh
@@ -43,7 +43,7 @@ DB schema validation (Postgres 16 used in prod; any 12+ works):
 ```bash
 # on a machine with a live Postgres:
 createdb pharmco
-psql pharmco -f db/master/001_master_schema.sql
+for f in db/master/*.sql; do psql pharmco -f "$f"; done
 db/scripts/apply_tenant_schema.sh "postgres://user@host/pharmco" tenant_pharmco_001
 ```
 

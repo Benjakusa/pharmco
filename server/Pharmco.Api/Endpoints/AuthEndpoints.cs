@@ -66,8 +66,7 @@ public static class AuthEndpoints
         }
 
         var user = await auth.FindUserAsync(tenant.Id, body.Username);
-        var passwordOk = user is not null && PasswordService.Verify(body.Password, user.PasswordHash);
-        if (!passwordOk)
+        if (user is null || !PasswordService.Verify(body.Password, user.PasswordHash))
         {
             limiter.RecordFailure(key);
             await auth.LogLoginAsync(body.Username, tenant.Code, "failure", tenant.Id, ip, userAgent, "{\"reason\":\"bad_password\"}");
@@ -202,7 +201,7 @@ public static class AuthEndpoints
 
     // --- GET /api/auth/session — validates a bearer token (desktop cache check) ---
 
-    public static async Task<IResult> Session(HttpContext http, JwtService jwt)
+    public static IResult Session(HttpContext http, JwtService jwt)
     {
         var token = Authz.Bearer(http);
         if (token.IsEmpty())
@@ -239,12 +238,4 @@ public static class AuthEndpoints
 
     private static string UserAgent(HttpContext http)
         => http.Request.Headers["user-agent"].ToString();
-
-    private static string Bearer(HttpContext http)
-    {
-        var header = http.Request.Headers["authorization"].ToString();
-        if (header.StartsWith("bearer ", StringComparison.OrdinalIgnoreCase))
-            return header.Substring(7).Trim();
-        return "";
-    }
 }

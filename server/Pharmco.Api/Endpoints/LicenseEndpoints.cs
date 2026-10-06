@@ -1,13 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Dapper;
-using Npgsql;
-using Pharmco.Api.Middleware;
 using Pharmco.Api.Services;
-using Pharmco.Core.Auth;
 using Pharmco.Core.Data;
-using Pharmco.Core.Licensing;
 using Pharmco.Core.Tenants;
 
 namespace Pharmco.Api.Endpoints;

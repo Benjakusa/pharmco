@@ -140,34 +140,22 @@ public static class MpesaCallbackEndpoint
     // ------------------------------------------------------------------
 
     private static string ExtractShortCode(StkPushCallback callback)
-    {
-        if (callback.CallbackMetadata?.Item?.Values is null)
-            return "";
-
-        // Safaricom sends ShortCode in the callback metadata values
-        return callback.CallbackMetadata.Item.Values
-            .FirstOrDefault(v => v.Key.Equals("ShortCode", StringComparison.OrdinalIgnoreCase))
-            .Value;
-    }
+        => ExtractMetadataValue(callback, "ShortCode");
 
     private static string ExtractAccountReference(StkPushCallback callback)
-    {
-        if (callback.CallbackMetadata?.Item?.Values is null)
-            return "";
-
-        return callback.CallbackMetadata.Item.Values
-            .FirstOrDefault(v => v.Key.Equals("AccountReference", StringComparison.OrdinalIgnoreCase))
-            .Value;
-    }
+        => ExtractMetadataValue(callback, "AccountReference");
 
     private static string ExtractMpesaReceiptNumber(StkPushCallback callback)
+        => ExtractMetadataValue(callback, "MpesaReceiptNumber");
+
+    // Safaricom sends these as key/value pairs in the callback metadata; missing keys yield "".
+    private static string ExtractMetadataValue(StkPushCallback callback, string key)
     {
-        if (callback.CallbackMetadata?.Item?.Values is null)
+        var values = callback.CallbackMetadata?.Item?.Values;
+        if (values is null)
             return "";
 
-        return callback.CallbackMetadata.Item.Values
-            .FirstOrDefault(v => v.Key.Equals("MpesaReceiptNumber", StringComparison.OrdinalIgnoreCase))
-            .Value;
+        return values.FirstOrDefault(v => v.Key.Equals(key, StringComparison.OrdinalIgnoreCase))?.Value ?? "";
     }
 
     // ------------------------------------------------------------------

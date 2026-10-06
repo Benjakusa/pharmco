@@ -6,8 +6,6 @@ namespace Pharmco.Client.Views;
 public partial class RenewDialog : Window
 {
     private readonly LicenseEnforcementService _enforcementService;
-    private readonly SyncEngine _syncEngine;
-    private readonly LocalDatabase _localDb;
 
     public RenewDialog(
         LicenseEnforcementService enforcementService,
@@ -16,8 +14,6 @@ public partial class RenewDialog : Window
     {
         InitializeComponent();
         _enforcementService = enforcementService;
-        _syncEngine = syncEngine;
-        _localDb = localDb;
 
         // Populate renewal info
         var info = _enforcementService.GetRenewalInfo();

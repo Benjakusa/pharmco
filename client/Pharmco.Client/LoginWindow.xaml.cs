@@ -8,7 +8,6 @@ public partial class LoginWindow : Window
 {
     private readonly SyncEngine _syncEngine;
     private readonly LicenseEnforcementService _licenseService;
-    private readonly LocalDatabase _localDb;
 
     public LoginWindow()
     {
@@ -16,7 +15,6 @@ public partial class LoginWindow : Window
 
         _syncEngine = App.Services.GetRequiredService<SyncEngine>();
         _licenseService = App.Services.GetRequiredService<LicenseEnforcementService>();
-        _localDb = App.Services.GetRequiredService<LocalDatabase>();
     }
 
     private async void LoginButton_Click(object sender, RoutedEventArgs e)

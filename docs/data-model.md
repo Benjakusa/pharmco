@@ -1,8 +1,8 @@
 # Pharmco POS — Data model
 
 Two schemas: **master** (lifecycle/Auth) + **per-tenant** (business data).
-DDL lives in `db/master/001_master_schema.sql` and
-`db/tenant-template/001_tenant_tables.sql` — both are executed against a live
+DDL lives in the ordered chains `db/master/` (001 → 003 → 006) and
+`db/tenant/` (002 → 004 → 005 → 007) — both are executed against a live
 Postgres in CI/validation (the exact round-trip lives in `.tmp/smoke.sql`).
 
 ## Master (schema `public`)
