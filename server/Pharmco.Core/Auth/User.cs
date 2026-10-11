@@ -13,5 +13,5 @@ public sealed class User
     public DateTimeOffset? DeletedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 
-    public UserRole RoleValue() => UserRole.Parse(Role);
+    public UserRole RoleValue() => UserRoles.Parse(Role);
 }

@@ -44,7 +44,7 @@ public partial class LicenseBanner : UserControl
         }
 
         BannerBorder.Visibility = Visibility.Visible;
-        WarningText.Text = LicenseState.GetWarningMessage();
+        WarningText.Text = _enforcementService?.GetWarningMessage() ?? "License status unknown.";
 
         // Show renew button only for warning/grace tiers
         RenewButton.Visibility = (LicenseState.Tier == LicenseEnforcementService.LicenseTier.WarningYellow

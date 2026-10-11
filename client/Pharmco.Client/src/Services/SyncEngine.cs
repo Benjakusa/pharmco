@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -180,7 +181,7 @@ public sealed class SyncEngine : IHostedService, IDisposable
 
         // Compress with gzip
         using var compressedStream = new MemoryStream();
-        using (var gzip = new System.IO.Compression.GZipStream(compressedStream, System.IO.Compression.CompressionMode.Compress))
+        using (var gzip = new System.IO.Compression.GZipStream(compressedStream, System.IO.Compression.CompressionLevel.SmallestSize))
         using (var writer = new StreamWriter(gzip, Encoding.UTF8))
         {
             await writer.WriteAsync(json);

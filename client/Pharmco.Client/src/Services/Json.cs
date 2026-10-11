@@ -1,5 +1,6 @@
 ﻿namespace Pharmco.Client.Services;
 
+using System.IO;
 using System.Text.Json;
 
 /// <summary>
