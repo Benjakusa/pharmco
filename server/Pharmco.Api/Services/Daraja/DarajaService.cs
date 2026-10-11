@@ -1,10 +1,10 @@
 namespace Pharmco.Api.Services.Daraja;
 
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Polly;
 using Dapper;
 using Npgsql;
 using Pharmco.Core.Security;
@@ -61,13 +61,16 @@ public sealed class DarajaService : IDisposable
         var creds = await GetCredentialsAsync(tenantId, ct)
             ?? throw new InvalidOperationException($"No Daraja config for tenant {tenantId}");
 
-        var request = new HttpRequestMessage(HttpMethod.Get,
-            "/oauth/v1/generate?grant_type=client_credentials");
-        request.Headers.Authorization = new BasicAuthenticationCredential(creds.ConsumerKey, creds.ConsumerSecret);
+        var basicAuth = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes($"{creds.ConsumerKey}:{creds.ConsumerSecret}"));
 
         var response = await ExecuteWithRetryAsync(async () =>
         {
-            var msg = await _http.SendAsync(request, ct);
+            // A fresh HttpRequestMessage per attempt — a sent request cannot be resent.
+            using var attempt = new HttpRequestMessage(HttpMethod.Get,
+                "/oauth/v1/generate?grant_type=client_credentials");
+            attempt.Headers.Authorization = new AuthenticationHeaderValue("Basic", basicAuth);
+            var msg = await _http.SendAsync(attempt, ct);
             msg.EnsureSuccessStatusCode();
             return msg;
         }, ct);
@@ -279,23 +282,28 @@ public sealed class DarajaService : IDisposable
     }
 
     /// <summary>
-    /// Executes an async operation with Polly retry (3 attempts, exponential backoff).
+    /// Executes an async operation with retry (3 attempts, exponential backoff)
+    /// on transient HTTP/network failures.
     /// </summary>
     private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, CancellationToken ct)
     {
-        return await Policy
-            .Handle<HttpRequestException>()
-            .Or<TaskCanceledException>()
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-                (exception, timeSpan, retryCount, context) =>
-                {
-                    _logger.LogWarning(exception,
-                        "Daraja request retry {RetryCount} after {Delay}s: {Message}",
-                        retryCount, timeSpan.TotalSeconds, exception.Message);
-                })
-            .ExecuteAsync(operation);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException)
+                                       && !ct.IsCancellationRequested
+                                       && attempt < 3)
+            {
+                var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt)); // 2s, 4s
+                _logger.LogWarning(ex,
+                    "Daraja request retry {RetryCount} after {Delay}s: {Message}",
+                    attempt, delay.TotalSeconds, ex.Message);
+                await Task.Delay(delay, ct);
+            }
+        }
     }
 
     public void Dispose()
@@ -346,12 +354,4 @@ public sealed class DarajaService : IDisposable
         public string ShortcodeType { get; init; } = "paybill";
         public DateTimeOffset? VerifiedAt { get; init; }
     }
-}
-
-/// <summary>Basic Auth header credential for HttpClient.</summary>
-file sealed class BasicAuthenticationCredential : AuthenticationHeaderValue
-{
-    public BasicAuthenticationCredential(string username, string password)
-        : base("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")))
-    { }
 }

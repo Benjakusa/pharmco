@@ -1,0 +1,5 @@
+﻿winget: False
+choco: False
+psql_cmd: False
+pg_service: 
+port5432: false

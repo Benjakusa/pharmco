@@ -1,0 +1,6 @@
+﻿C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\Pharmco.Client.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\Pharmco.Client.Tests.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\server\Pharmco.Api\Pharmco.Api.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\server\Pharmco.Cli\Pharmco.Cli.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\server\Pharmco.Core\Pharmco.Core.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\server\Pharmco.Tests\Pharmco.Tests.csproj

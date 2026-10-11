@@ -1,0 +1,8 @@
+﻿C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\App.xaml
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\App.xaml.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\LoginWindow.xaml
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\LoginWindow.xaml.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\MainWindow.xaml
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\MainWindow.xaml.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\Pharmco.Client.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client\README.md

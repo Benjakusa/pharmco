@@ -1,0 +1,10 @@
+﻿C:\Users\OPENDESK\Desktop\Pharmco\db\master\001_master.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\master\001_master_schema.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\master\003_refresh_tokens.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\master\006_daraja.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\scripts\apply_tenant_schema.sh
+C:\Users\OPENDESK\Desktop\Pharmco\db\tenant\002_tenant_template.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\tenant\004_tenant_products.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\tenant\005_tenant_sales.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\tenant\007_sync_queue.sql
+C:\Users\OPENDESK\Desktop\Pharmco\db\tenant-template\001_tenant_tables.sql

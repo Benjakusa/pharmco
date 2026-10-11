@@ -1,305 +1,169 @@
-namespace Pharmco.Client.Services;
+﻿namespace Pharmco.Client.Services;
 
-using java.util;
+using System.Text.Json;
 
 /// <summary>
-/// Minimal JSON reader/writer for the desktop client (login/refresh/session
-/// payloads are tiny and flat). No third-party JSON required.
+/// Minimal JSON value model for the desktop client (login/refresh/session
+/// payloads are tiny and flat). Backed by System.Text.Json; kept as a small
+/// hand-rolled DOM so call sites stay dependency-free and allocation-cheap.
 /// </summary>
-public abstract sealed class JsonValue { }
+public abstract class JsonValue { }
 
 public sealed class JsonEntry
 {
     public string Key = "";
-    public JsonValue Value { get; set; }
+    public JsonValue Value { get; set; } = JsonNull.Instance;
 }
 
-public sealed class JsonObject extends JsonValue
+public sealed class JsonObject : JsonValue
 {
-    private final LinkedHashMap<string, JsonValue> _fields = new();
+    private readonly Dictionary<string, JsonValue> _fields = new();
 
     public bool Has(string key) => _fields.ContainsKey(key);
-    public JsonObject GetObject(string key) => _fields.Get(key) as? JsonObject;
-    public JsonArray GetArray(string key) => _fields.Get(key) as? JsonArray;
+    public JsonObject? GetObject(string key) => _fields.TryGetValue(key, out var v) ? v as JsonObject : null;
+    public JsonArray? GetArray(string key) => _fields.TryGetValue(key, out var v) ? v as JsonArray : null;
+
     public string? GetString(string key)
-    {
-        var v = _fields.Get(key);
-        return v is JsonString s ? s.Value : null;
-    }
+        => _fields.TryGetValue(key, out var v) ? (v as JsonString)?.Value : null;
+
     public long GetLong(string key, long fallback)
-    {
-        var v = _fields.Get(key);
-        return v is JsonNumber n ? (long) Math.round(n.Value) : fallback;
-    }
+        => _fields.TryGetValue(key, out var v) && v is JsonNumber n ? (long) Math.Round(n.Value) : fallback;
+
     public bool GetBool(string key, bool fallback)
-    {
-        var v = _fields.Get(key);
-        return v is JsonBool b ? b.Value : fallback;
-    }
-    public void Put(string key, JsonValue value) => _fields.Put(key, value);
+        => _fields.TryGetValue(key, out var v) && v is JsonBool b ? b.Value : fallback;
+
+    public void Put(string key, JsonValue value) => _fields[key] = value;
 
     public IReadOnlyList<JsonEntry> Entries()
     {
-        var out = new ArrayList<JsonEntry>();
-        foreach (var entry in _fields)
-            out.Add(new JsonEntry { Key = entry.Key, Value = entry.Value });
-        return out;
+        var entries = new List<JsonEntry>(_fields.Count);
+        foreach (var pair in _fields)
+            entries.Add(new JsonEntry { Key = pair.Key, Value = pair.Value });
+        return entries;
     }
 }
 
-public sealed class JsonArray extends JsonValue
+public sealed class JsonArray : JsonValue
 {
-    private final ArrayList<JsonValue> _items = new();
+    private readonly List<JsonValue> _items = new();
     public void Add(JsonValue value) => _items.Add(value);
     public int Size() => _items.Count;
     public IReadOnlyList<JsonValue> Items() => _items;
 }
 
-public sealed class JsonString extends JsonValue { public string Value { get; set; } }
-public sealed class JsonNumber extends JsonValue { public double Value { get; set; } }
-public sealed class JsonBool extends JsonValue { public bool Value { get; set; } }
-public sealed class JsonNull extends JsonValue { public static readonly JsonValue Instance = new JsonNull(); }
+public sealed class JsonString : JsonValue { public string Value { get; set; } = ""; }
+public sealed class JsonNumber : JsonValue { public double Value { get; set; } }
+public sealed class JsonBool : JsonValue { public bool Value { get; set; } }
+public sealed class JsonNull : JsonValue { public static readonly JsonValue Instance = new JsonNull(); }
 
 // --- static facade -------------------------------------------------------------
 
 public static class Json
 {
-    public static JsonObject Obj(object... entries)
+    /// <summary>Builds a JsonObject from alternating key/value arguments.</summary>
+    public static JsonObject Obj(params object?[] entries)
     {
-        var object = new JsonObject();
+        var obj = new JsonObject();
         for (var i = 0; i + 1 < entries.Length; i += 2)
-            object.Put((string) entries[i], Value(entries[i + 1]));
-        return object;
+            obj.Put((string) entries[i]!, Value(entries[i + 1]));
+        return obj;
     }
 
-    public static JsonValue Value(object value)
+    public static JsonValue Value(object? value)
     {
         if (value is null) return JsonNull.Instance;
         if (value is JsonValue j) return j;
         if (value is bool b) return new JsonBool { Value = b };
-        if (value is long || value is int || value is double || value is float)
-            return new JsonNumber { Value = ((Number) value).doubleValue() };
-        return new JsonString { Value = value.ToString() };
+        if (value is int i) return new JsonNumber { Value = i };
+        if (value is long l) return new JsonNumber { Value = l };
+        if (value is double d) return new JsonNumber { Value = d };
+        if (value is float f) return new JsonNumber { Value = f };
+        return new JsonString { Value = value.ToString() ?? "" };
     }
 
     public static JsonValue Parse(string text)
+        => FromElement(JsonDocument.Parse(text).RootElement);
+
+    public static string Stringify(JsonValue value)
     {
-        var p = new Parser(text);
-        var value = p.ParseValue();
-        p.SkipWs();
-        if (!p.AtEnd()) throw new ParseException("trailing characters", p.Pos);
-        return value;
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+            Write(writer, value);
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    public static string Stringify(JsonValue value) => new Writer().Write(value);
-
-    public sealed class ParseException extends Exception
+    public sealed class ParseException : Exception
     {
-        public ParseException(string message, int pos) { super(message + " @ " + pos); }
+        public ParseException(string message) : base(message) { }
     }
-}
 
-// --- parser ---------------------------------------------------------------------
+    // --- internals -----------------------------------------------------------------
 
-private sealed class Parser
-{
-    private readonly string _text;
-    public int Pos { get; set; } = 0;
-
-    public Parser(string text) => _text = text;
-
-    public void SkipWs()
+    private static JsonValue FromElement(JsonElement element)
     {
-        while (!AtEnd())
+        switch (element.ValueKind)
         {
-            var c = _text.charAt(Pos);
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') Pos++;
-            else break;
-        }
-    }
-
-    public bool AtEnd() => Pos >= _text.Length;
-
-    private void Expect(char c)
-    {
-        if (AtEnd() || _text.charAt(Pos) != c)
-            throw new Json.ParseException("expected '" + c + "'", Pos);
-        Pos++;
-    }
-
-    public JsonValue ParseValue()
-    {
-        SkipWs();
-        if (AtEnd()) throw new Json.ParseException("unexpected end of input", Pos);
-        return switch (_text.charAt(Pos))
-        {
-            case '{' -> ParseObject();
-            case '[' -> ParseArray();
-            case '"' -> new JsonString { Value = ParseString() };
-            case 't' -> { ParseLiteral("true"); new JsonBool { Value = true }; }
-            case 'f' -> { ParseLiteral("false"); new JsonBool { Value = false }; }
-            case 'n' -> { ParseLiteral("null"); JsonNull.Instance; }
-            default -> ParseNumber();
-        };
-    }
-
-    private JsonObject ParseObject()
-    {
-        Expect('{');
-        var object = new JsonObject();
-        SkipWs();
-        if (!AtEnd() && _text.charAt(Pos) == '}') { Pos++; return object; }
-        while (true)
-        {
-            SkipWs();
-            var key = ParseString();
-            SkipWs();
-            Expect(':');
-            var value = ParseValue();
-            object.Put(key, value);
-            SkipWs();
-            if (AtEnd()) throw new Json.ParseException("unterminated object", Pos);
-            var c = _text.charAt(Pos);
-            if (c == ',') { Pos++; continue; }
-            if (c == '}') { Pos++; return object; }
-            throw new Json.ParseException("expected ',' or '}'", Pos);
-        }
-    }
-
-    private JsonArray ParseArray()
-    {
-        Expect('[');
-        var array = new JsonArray();
-        SkipWs();
-        if (!AtEnd() && _text.charAt(Pos) == ']') { Pos++; return array; }
-        while (true)
-        {
-            array.Add(ParseValue());
-            SkipWs();
-            if (AtEnd()) throw new Json.ParseException("unterminated array", Pos);
-            var c = _text.charAt(Pos);
-            if (c == ',') { Pos++; continue; }
-            if (c == ']') { Pos++; return array; }
-            throw new Json.ParseException("expected ',' or ']'", Pos);
-        }
-    }
-
-    private string ParseString()
-    {
-        Expect('"');
-        var sb = new StringBuilder();
-        while (!AtEnd())
-        {
-            var c = _text.charAt(Pos++);
-            if (c == '"') return sb.ToString();
-            if (c != '\\') { sb.Append(c); continue; }
-            if (AtEnd()) throw new Json.ParseException("dangling escape", Pos);
-            var e = _text.charAt(Pos++);
-            switch (e)
+            case JsonValueKind.Object:
             {
-                case '"' -> sb.Append('"');
-                case '\\' -> sb.Append('\\');
-                case '/' -> sb.Append('/');
-                case 'b' -> sb.Append('\b');
-                case 'f' -> sb.Append('\f');
-                case 'n' -> sb.Append('\n');
-                case 'r' -> sb.Append('\r');
-                case 't' -> sb.Append('\t');
-                case 'u' ->
+                var obj = new JsonObject();
+                foreach (var property in element.EnumerateObject())
+                    obj.Put(property.Name, FromElement(property.Value));
+                return obj;
+            }
+            case JsonValueKind.Array:
+            {
+                var array = new JsonArray();
+                foreach (var item in element.EnumerateArray())
+                    array.Add(FromElement(item));
+                return array;
+            }
+            case JsonValueKind.String:
+                return new JsonString { Value = element.GetString() ?? "" };
+            case JsonValueKind.Number:
+                return new JsonNumber { Value = element.GetDouble() };
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                return new JsonBool { Value = element.GetBoolean() };
+            default:
+                return JsonNull.Instance;
+        }
+    }
+
+    private static void Write(Utf8JsonWriter writer, JsonValue value)
+    {
+        switch (value)
+        {
+            case JsonObject o:
+            {
+                writer.WriteStartObject();
+                foreach (var entry in o.Entries())
                 {
-                    if (Pos + 4 > _text.Length) throw new Json.ParseException("bad \\u escape", Pos);
-                    var hex = _text.Substring(Pos, 4);
-                    Pos += 4;
-                    sb.Append((char) Integer.parseInt(hex, 16));
+                    writer.WritePropertyName(entry.Key);
+                    Write(writer, entry.Value);
                 }
-                default -> throw new Json.ParseException("unknown escape '\\" + e + "'", Pos);
+                writer.WriteEndObject();
+                break;
             }
-        }
-        throw new Json.ParseException("unterminated string", Pos);
-    }
-
-    private JsonNumber ParseNumber()
-    {
-        var start = Pos;
-        while (!AtEnd())
-        {
-            var c = _text.charAt(Pos);
-            if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E') Pos++;
-            else break;
-        }
-        var raw = _text.Substring(start, Pos - start);
-        if (raw.IsEmpty() || raw.Equals("-") || raw.Equals("."))
-            throw new Json.ParseException("invalid number", start);
-        return new JsonNumber { Value = Double.Parse(raw) };
-    }
-
-    private void ParseLiteral(string literal)
-    {
-        if (Pos + literal.Length > _text.Length || !_text.Substring(Pos, literal.Length).Equals(literal))
-            throw new Json.ParseException("invalid literal", Pos);
-        Pos += literal.Length;
-    }
-}
-
-// --- writer ----------------------------------------------------------------------
-
-private sealed class Writer
-{
-    public string Write(JsonValue value)
-    {
-        if (value is JsonObject o)
-        {
-            var sb = new StringBuilder("{");
-            bool first = true;
-            foreach (var entry in o.Entries())
+            case JsonArray a:
             {
-                if (!first) sb.Append(',');
-                first = false;
-                WriteString(sb, entry.Key);
-                sb.Append(':').Append(Write(entry.Value));
+                writer.WriteStartArray();
+                foreach (var item in a.Items())
+                    Write(writer, item);
+                writer.WriteEndArray();
+                break;
             }
-            return sb.Append('}').ToString();
+            case JsonString s:
+                writer.WriteStringValue(s.Value);
+                break;
+            case JsonNumber n:
+                writer.WriteNumberValue(n.Value);
+                break;
+            case JsonBool b:
+                writer.WriteBooleanValue(b.Value);
+                break;
+            default:
+                writer.WriteNullValue();
+                break;
         }
-        if (value is JsonArray a)
-        {
-            var sb = new StringBuilder("[");
-            bool first = true;
-            foreach (var item in a.Items())
-            {
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append(Write(item));
-            }
-            return sb.Append(']').ToString();
-        }
-        if (value is JsonString s)
-        {
-            var sb = new StringBuilder();
-            WriteString(sb, s.Value);
-            return sb.ToString();
-        }
-        if (value is JsonNumber n) return n.Value.ToString();
-        if (value is JsonBool b) return b.Value ? "true" : "false";
-        return "null";
-    }
-
-    private void WriteString(StringBuilder sb, string s)
-    {
-        sb.Append('"');
-        foreach (var c in s.ToCharArray())
-        {
-            switch (c)
-            {
-                case '"' -> sb.Append("\\\"");
-                case '\\' -> sb.Append("\\\\");
-                case '\n' -> sb.Append("\\n");
-                case '\r' -> sb.Append("\\r");
-                case '\t' -> sb.Append("\\t");
-                case '\b' -> sb.Append("\\b");
-                case '\f' -> sb.Append("\\f");
-                default -> sb.Append(c);
-            }
-        }
-        sb.Append('"');
     }
 }

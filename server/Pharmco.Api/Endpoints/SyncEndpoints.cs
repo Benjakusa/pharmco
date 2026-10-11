@@ -31,7 +31,6 @@ public static class SyncEndpoints
         TenantRepository tenantRepo,
         NpgsqlConnectionFactory connectionFactory,
         JwtService jwt,
-        LicenseService licenseService,
         ILogger<SyncEndpoints> logger)
     {
         // Require any authenticated user (not admin-only — cashiers must be able to push sales)

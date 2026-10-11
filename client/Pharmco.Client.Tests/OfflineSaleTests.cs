@@ -1,5 +1,6 @@
-using Xunit;
+﻿using Xunit;
 using Pharmco.Client.Models;
+using Pharmco.Core.Sales;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client.Tests;
@@ -95,3 +96,4 @@ public class OfflineSaleTests
         Assert.Empty(pendingAfter);
     }
 }
+

@@ -1,21 +1,22 @@
-using System.Windows;
+﻿using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client;
 
 public partial class LoginWindow : Window
 {
+    private readonly SessionManager _sessionManager;
     private readonly SyncEngine _syncEngine;
     private readonly LicenseEnforcementService _licenseService;
-    private readonly LocalDatabase _localDb;
 
     public LoginWindow()
     {
         InitializeComponent();
 
+        _sessionManager = App.Services.GetRequiredService<SessionManager>();
         _syncEngine = App.Services.GetRequiredService<SyncEngine>();
         _licenseService = App.Services.GetRequiredService<LicenseEnforcementService>();
-        _localDb = App.Services.GetRequiredService<LocalDatabase>();
     }
 
     private async void LoginButton_Click(object sender, RoutedEventArgs e)
@@ -33,43 +34,35 @@ public partial class LoginWindow : Window
             return;
         }
 
-        try
-        {
-            // Validate offline first using cached credentials
-            var result = await _licenseService.LoadCachedLicenseAsync();
+        // Online first (writes the offline cache as a side effect), offline as fallback.
+        var outcome = await _sessionManager.LoginOnlineAsync(pharmacyCode, username, password);
+        if (!outcome.Allowed)
+            outcome = _sessionManager.LoginOffline(pharmacyCode, username, password);
 
-            if (!result.IsValid)
+        if (!outcome.Allowed)
+        {
+            var detail = outcome.Reason switch
             {
-                MessageBox.Show(
-                    $"License error: {result.Error}\n\nPlease contact Pharmco to renew.",
-                    "License Error",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-                return;
-            }
-
-            // In production, this would call the auth API
-            // For now, simulate successful login
-            MessageBox.Show(
-                $"Login successful! Welcome to Pharmco POS.\n\nTenant: {result.TenantCode}",
-                "Welcome",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-
-            // Trigger sync
-            await _syncEngine.ForceSyncAsync();
-
-            // Close login and show main window
-            DialogResult = true;
-            Close();
+                "server_rejected" => "The server rejected these credentials.",
+                "invalid_password" => "Wrong password (offline cache).",
+                "cache_stale" => "Offline cache is older than 7 days — connect to the internet once.",
+                _ => "No cached credentials for this pharmacy — connect to the internet for the first login.",
+            };
+            MessageBox.Show($"Login failed. {detail}", "Login Failed",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
-        catch (Exception ex)
-        {
-            MessageBox.Show(
-                $"Login failed: {ex.Message}",
-                "Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
+
+        var session = outcome.Session!;
+        MessageBox.Show(
+            $"Login successful! Welcome to Pharmco POS.\n\nTenant: {session.User.TenantCode}\nRole: {session.User.Role}\nOffline: {session.Offline}",
+            "Welcome", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        // Best-effort sync kick (fails harmlessly when the API is unreachable).
+        try { await _syncEngine.ForceSyncAsync(); }
+        catch { /* offline — the background engine retries on its schedule */ }
+
+        DialogResult = true;
+        Close();
     }
 }

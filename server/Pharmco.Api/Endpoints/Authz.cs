@@ -34,7 +34,7 @@ public static class Authz
     /// <summary>Bearer token from the Authorization header, or "".</summary>
     public static string Bearer(HttpContext http)
     {
-        var header = http.Request.Headers["authorization"] ?? "";
+        var header = http.Request.Headers["authorization"].FirstOrDefault() ?? "";
         if (header.ToLower().StartsWith("bearer "))
             return header.Substring(7).Trim();
         return "";

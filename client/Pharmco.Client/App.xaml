@@ -1,16 +1,10 @@
 <Application x:Class="Pharmco.Client.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <!-- TODO(phase 1): theme brushes, converters (error/warn/info banners,
                             loud/striped "M-Pesa offline" UI, red license banner) -->
     </Application.Resources>
-    <!-- Auth bootstrap (PROMPT-2) — wire in the startup handler:
-             var auth   = new AuthService(settings.BaseUrl());
-             var cache  = CredentialCache.OpenDefault();
-             var mgr    = new SessionManager(auth, cache, new SessionManager.Options());
-             mgr.SetOnLocked(session => ShowLockScreen());      // auto-lock
-             var launch = await mgr.OnLaunchAsync(code, lastUser);
-             if (!launch.HasSession) -> ShowLogin(mgr);         // online or offline login -->
+    <!-- Auth bootstrap (PROMPT-2): OnStartup wires AuthService + CredentialCache +
+             SessionManager from DI, then MainWindow hosts the login flow. -->
 </Application>

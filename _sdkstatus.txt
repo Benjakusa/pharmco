@@ -1,0 +1,3 @@
+﻿LOG: 
+ERR: Unable to download https://aka.ms/dotnet/8.0/d otnet-sdk-win-x64.zip. At C:\Users\OPENDESK\Desktop\Pharmco\_dotnet-i nstall.ps1:505 char:13 + throw $DownloadException + ~~~~~~~~~~~~~~~~~~~~~~~~ + CategoryInfo : OperationStoppe d: (:) [], Exception + FullyQualifiedErrorId : Unable to downl oad https://aka.ms/dotnet/8.0/dotnet-sdk- win-x64.zip. 
+sdk_dir: False

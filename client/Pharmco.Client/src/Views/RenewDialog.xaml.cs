@@ -1,4 +1,5 @@
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client.Views;
@@ -8,6 +9,14 @@ public partial class RenewDialog : Window
     private readonly LicenseEnforcementService _enforcementService;
     private readonly SyncEngine _syncEngine;
     private readonly LocalDatabase _localDb;
+
+    /// <summary>Parameterless ctor for XAML/designer + LicenseBanner (resolves from DI).</summary>
+    public RenewDialog()
+        : this(
+            App.Services.GetRequiredService<LicenseEnforcementService>(),
+            App.Services.GetRequiredService<SyncEngine>(),
+            App.Services.GetRequiredService<LocalDatabase>())
+    { }
 
     public RenewDialog(
         LicenseEnforcementService enforcementService,

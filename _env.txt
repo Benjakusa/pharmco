@@ -1,0 +1,6 @@
+﻿CMD dotnet: True
+CMD docker: False
+CMD python: True
+VSWhere: False
+EXISTS C:\Program Files\dotnet\dotnet.exe : True
+EXISTS C:\Users\OPENDESK\AppData\Local\Microsoft\dotnet\dotnet.exe : False

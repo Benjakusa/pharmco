@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Pharmco.Client.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,13 @@ public sealed class LicenseEnforcementService : IHostedService
 
     public LicenseEnforcementState State => _state;
     public event Action<LicenseEnforcementState>? StateChanged;
+
+    /// <summary>Replaces the cached state and notifies listeners (UI banner, tests).</summary>
+    public void SetState(LicenseEnforcementState state)
+    {
+        _state = state;
+        StateChanged?.Invoke(_state);
+    }
 
     public LicenseEnforcementService(
         LocalDatabase localDb,
@@ -153,23 +161,17 @@ public sealed class LicenseEnforcementService : IHostedService
 
     /// <summary>
     /// Checks if a sale is allowed based on current license state.
+    /// Sales are blocked from the ReadOnly tier upward (ReadOnly, HardLock).
     /// </summary>
     public bool IsSaleAllowed()
     {
-        // Hard lock: can't make sales
-        if (_state.Tier <= LicenseTier.HardLock)
-            return false;
-
-        // Read-only: can't make sales
-        if (_state.Tier <= LicenseTier.ReadOnly)
+        // Read-only / hard lock: no sales
+        if (_state.Tier >= LicenseTier.ReadOnly)
             return false;
 
         // Grace period: warn but allow
         if (_state.Tier == LicenseTier.GracePeriod)
-        {
-            _logger.LogWarning("Sale allowed in grace period — license expired");
-            return true;
-        }
+            _logger?.LogWarning("Sale allowed in grace period — license expired");
 
         return true;
     }
@@ -179,6 +181,9 @@ public sealed class LicenseEnforcementService : IHostedService
     /// </summary>
     public string GetWarningMessage()
     {
+        if (!_state.IsValid)
+            return _state.Error ?? "No license cached";
+
         return _state.Tier switch
         {
             LicenseTier.Normal => "",

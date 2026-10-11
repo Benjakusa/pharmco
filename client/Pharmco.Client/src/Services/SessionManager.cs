@@ -1,8 +1,8 @@
-namespace Pharmco.Client.Services;
+﻿namespace Pharmco.Client.Services;
 
+using System.Threading;
 using Pharmco.Client.Models;
 using Pharmco.Core.Auth;
-using java.util.function;
 
 /// <summary>
 /// Desktop session orchestrator.
@@ -42,8 +42,8 @@ public sealed class SessionManager
     private readonly CredentialCache _cache;
     private readonly Options _options;
     private Session? _session;
-    private java.util.Timer _idleTimer;
-    private Consumer<Session> _onLocked;
+    private Timer? _idleTimer;
+    private Action<Session>? _onLocked;
 
     public SessionManager(AuthService auth, CredentialCache cache, Options options)
     {
@@ -57,7 +57,7 @@ public sealed class SessionManager
     public bool IsLocked() => _session is not null && _session.Locked;
 
     /// <summary>UI hook: invoked when auto-lock flips a session to Locked.</summary>
-    public void SetOnLocked(Consumer<Session> onLocked) => _onLocked = onLocked;
+    public void SetOnLocked(Action<Session> onLocked) => _onLocked = onLocked;
 
     // --- login ------------------------------------------------------------------
 
@@ -67,7 +67,7 @@ public sealed class SessionManager
         try { resp = await _auth.LoginAsync(pharmacyCode, username, password); }
         catch (AuthError) { return new LoginOutcome { Allowed = false, Reason = "server_rejected" }; }
 
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         _cache.Save(new CachedCredential
         {
             PharmacyCode = pharmacyCode,
@@ -90,17 +90,15 @@ public sealed class SessionManager
     public LoginOutcome LoginOffline(string pharmacyCode, string username, string password)
     {
         var cached = _cache.Find(pharmacyCode, username);
-        var facts = cached is null
-            ? null
-            : new CachedCredentialFacts
-              {
-                  Username = cached.Username,
-                  PasswordHash = cached.PasswordHash,
-                  LastVerifiedAt = cached.LastVerifiedAt,
-              };
-        var decision = OfflineGate.Evaluate(facts, password, DateTimeOffset.now());
-        if (!decision.Allowed)
-            return new LoginOutcome { Allowed = false, Reason = decision.Reason };
+        var facts = cached is null ? null : new CachedCredentialFacts
+        {
+            Username = cached.Username,
+            PasswordHash = cached.PasswordHash,
+            LastVerifiedAt = cached.LastVerifiedAt,
+        };
+        var verdict = OfflineGate.Evaluate(facts, password, DateTimeOffset.UtcNow);
+        if (!verdict.Allowed)
+            return new LoginOutcome { Allowed = false, Reason = verdict.Reason };
 
         var session = SessionFromCache(pharmacyCode, cached!, offline: true);
         StartSession(session);
@@ -109,59 +107,60 @@ public sealed class SessionManager
 
     // --- launch -----------------------------------------------------------------
 
-    /// <summary>
-    /// Online-first launch validation. Returns HasSession=true when the cached
-    /// access token validates or a refresh rotation succeeded; otherwise the UI
-    /// shows the login screen and offline login may still succeed via
-    /// <c>LoginOfflineAsync</c> (fresh cache + correct password).
-    /// </summary>
-    public async Task<LaunchOutcome> OnLaunchAsync(string pharmacyCode, string username)
+    /// <summary>Online-first launch: validate cached access token (or refresh), else fall to login.</summary>
+    public async Task<LaunchOutcome> OnLaunchAsync(string? pharmacyCode, string? lastUsername)
     {
-        var cached = _cache.Find(pharmacyCode, username);
-        if (cached is null)
-            return new LaunchOutcome();
+        if (string.IsNullOrEmpty(pharmacyCode) || string.IsNullOrEmpty(lastUsername))
+            return new LaunchOutcome { HasSession = false };
 
+        var cached = _cache.Find(pharmacyCode, lastUsername);
+        if (cached is null)
+            return new LaunchOutcome { HasSession = false };
+
+        // 1. Cached access token still valid online?
         try
         {
-            if (await _auth.ValidateOnlineAsync(cached.AccessToken))
+            if (!string.IsNullOrEmpty(cached.AccessToken)
+                && await _auth.ValidateOnlineAsync(cached.AccessToken))
             {
-                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.now());
+                _cache.UpdateVerifiedAt(pharmacyCode, lastUsername, DateTimeOffset.UtcNow);
                 var session = SessionFromCache(pharmacyCode, cached, offline: false);
                 StartSession(session);
                 return new LaunchOutcome { HasSession = true, Session = session };
             }
-            if (!cached.RefreshToken.IsEmpty())
+
+            // 2. Rotate via refresh token.
+            if (!string.IsNullOrEmpty(cached.RefreshToken))
             {
                 var resp = await _auth.RefreshAsync(cached.RefreshToken);
-                _cache.UpdateTokens(pharmacyCode, username, resp.AccessToken, resp.RefreshToken);
-                _cache.UpdateVerifiedAt(pharmacyCode, username, DateTimeOffset.now());
+                _cache.UpdateTokens(pharmacyCode, lastUsername, resp.AccessToken, resp.RefreshToken);
+                _cache.UpdateVerifiedAt(pharmacyCode, lastUsername, DateTimeOffset.UtcNow);
                 var session = NewSession(pharmacyCode, resp, offline: false);
                 StartSession(session);
                 return new LaunchOutcome { HasSession = true, Session = session };
             }
         }
-        catch (AuthError) { /* fall through to offline path */ }
-        return new LaunchOutcome();
+        catch (AuthError) { /* fall through to login screen */ }
+
+        return new LaunchOutcome { HasSession = false };
     }
 
-    // --- auto-lock / unlock ------------------------------------------------------
+    // --- activity / lock --------------------------------------------------------
 
-    /// <summary>UI must call this on every input event (keyboard/mouse/touch).</summary>
     public void NotifyActivity()
     {
-        if (_session is null) return;
-        _session.LastActivity = DateTimeOffset.now();
+        if (_session is not null && !_session.Locked)
+            _session.LastActivity = DateTimeOffset.UtcNow;
     }
 
     public void Lock()
     {
-        if (_session is null) return;
+        if (_session is null || _session.Locked) return;
         _session.Locked = true;
-        if (_onLocked is not null)
-            _onLocked.Accept(_session);
+        _onLocked?.Invoke(_session);
     }
 
-    /// <summary>Unlock = the password verifies online (preferred) or against a fresh cache.</summary>
+    /// <summary>Unlock online (preferred) or against a fresh cache.</summary>
     public async Task<bool> UnlockAsync(string pharmacyCode, string username, string password)
     {
         var ok = false;
@@ -177,7 +176,7 @@ public sealed class SessionManager
                     PasswordHash = cached.PasswordHash,
                     LastVerifiedAt = cached.LastVerifiedAt,
                 };
-                ok = OfflineGate.Evaluate(facts, password, DateTimeOffset.now()).Allowed;
+                ok = OfflineGate.Evaluate(facts, password, DateTimeOffset.UtcNow).Allowed;
             }
         }
         if (ok && _session is not null)
@@ -209,30 +208,27 @@ public sealed class SessionManager
         _session = session;
         if (_options.AutoLockMinutes > 0)
         {
-            _idleTimer = new java.util.Timer("pharmco-idle-watcher", true);
-            _idleTimer.scheduleAtFixedRate(_options.IdleCheckIntervalSeconds, () => CheckIdle());
+            var interval = TimeSpan.FromSeconds(_options.IdleCheckIntervalSeconds);
+            _idleTimer = new Timer(_ => CheckIdle(), null, interval, interval);
         }
     }
 
     private void CheckIdle()
     {
         if (_session is null || _session.Locked) return;
-        if (IdlePolicy.ShouldLock(_session.LastActivity, DateTimeOffset.now(), _options.AutoLockMinutes))
+        if (IdlePolicy.ShouldLock(_session.LastActivity, DateTimeOffset.UtcNow, _options.AutoLockMinutes))
             Lock();
     }
 
     private void StopIdleTimer()
     {
-        if (_idleTimer is not null)
-        {
-            _idleTimer.cancel();
-            _idleTimer = null;
-        }
+        _idleTimer?.Dispose();
+        _idleTimer = null;
     }
 
     private static Session NewSession(string pharmacyCode, LoginResponse resp, bool offline)
     {
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         return new Session
         {
             PharmacyCode = pharmacyCode,
@@ -248,7 +244,7 @@ public sealed class SessionManager
 
     private static Session SessionFromCache(string pharmacyCode, CachedCredential cached, bool offline)
     {
-        var now = DateTimeOffset.now();
+        var now = DateTimeOffset.UtcNow;
         return new Session
         {
             PharmacyCode = pharmacyCode,

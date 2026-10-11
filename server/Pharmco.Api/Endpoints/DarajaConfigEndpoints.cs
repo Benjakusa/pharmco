@@ -5,6 +5,7 @@ using System.Text.Json;
 using Dapper;
 using Npgsql;
 using Pharmco.Api.Services.Daraja;
+using Pharmco.Core.Sales;
 using Pharmco.Core.Security;
 using Microsoft.Extensions.Logging;
 

@@ -201,7 +201,7 @@ public static class AuthEndpoints
 
     // --- GET /api/auth/session — validates a bearer token (desktop cache check) ---
 
-    public static async Task<IResult> Session(HttpContext http, JwtService jwt)
+    public static IResult Session(HttpContext http, JwtService jwt)
     {
         var token = Authz.Bearer(http);
         if (string.IsNullOrEmpty(token))
@@ -217,8 +217,6 @@ public static class AuthEndpoints
             license_expires_at = claims.LicenseExpiresAtEpoch == 0 ? (long?)null : claims.LicenseExpiresAtEpoch,
             token_expires_at = claims.ExpiresAt.ToUnixTimeSeconds(),
         }, statusCode: StatusCodes.Status200OK);
-
-        await Task.CompletedTask; // satisfy async signature
     }
 
     // --- helpers ------------------------------------------------------------------

@@ -1,0 +1,6 @@
+﻿C:\Users\OPENDESK\Desktop\Pharmco\docs\api-contract.md
+C:\Users\OPENDESK\Desktop\Pharmco\docs\architecture.md
+C:\Users\OPENDESK\Desktop\Pharmco\docs\data-model.md
+C:\Users\OPENDESK\Desktop\Pharmco\docs\onboarding.md
+C:\Users\OPENDESK\Desktop\Pharmco\docs\repair-plan-v2.md
+C:\Users\OPENDESK\Desktop\Pharmco\docs\sync-architecture.md

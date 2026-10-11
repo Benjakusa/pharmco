@@ -50,13 +50,12 @@ public sealed class CachedCredential
 }
 
 /// <summary>Machine-readable failure from the auth service / session manager.</summary>
-public sealed class AuthError extends Exception
+public sealed class AuthError : Exception
 {
     public string Code = "";
 
-    public AuthError(string code, string message)
+    public AuthError(string code, string message) : base(message)
     {
-        super(message);
         Code = code;
     }
 }

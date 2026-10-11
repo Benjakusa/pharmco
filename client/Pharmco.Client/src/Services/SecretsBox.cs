@@ -1,18 +1,17 @@
-namespace Pharmco.Client.Services;
+﻿namespace Pharmco.Client.Services;
 
-using java.nio.charset;
-using java.security;
+using System.Security.Cryptography;
+using System.Text;
 
 /// <summary>
 /// Cross-platform secret envelope for the credential cache.
 ///
-/// Windows (the deployment target, <c>net8.0-windows</c>): tokens are wrapped
-/// with the Windows Data Protection API (DPAPI) via
-/// <c>Windows.Data.ProtectedData</c> — the same user + machine who encrypted
-/// can decrypt, OS-managed keying.
+/// Windows (the deployment target, net8.0-windows): tokens are wrapped
+/// with the Windows Data Protection API (DPAPI) via ProtectedData — the
+/// same user + machine who encrypted can decrypt, OS-managed keying.
 ///
-/// Non-Windows / CI (Linux sandbox): transparent AES-256-GCM fallback keyed by
-/// <c>PHARMCO_DEV_ENCRYPTION_KEY</c> (or a per-machine key file) so the auth
+/// Non-Windows / CI: transparent AES-256-GCM fallback keyed by
+/// PHARMCO_DEV_ENCRYPTION_KEY (or a per-machine key file) so the auth
 /// flow stays runnable in development. Production builds must use DPAPI.
 /// </summary>
 public static class SecretsBox
@@ -21,7 +20,7 @@ public static class SecretsBox
     public static readonly string DevContext = "pharmco.local.credential-cache.v1";
 
     public static byte[] Protect(string plaintext)
-        => Protect(plaintext.getBytes(Charset.UTF_8));
+        => Protect(Encoding.UTF8.GetBytes(plaintext));
 
     public static byte[] Protect(byte[] plaintext)
         => Cipher.Protect(plaintext, DevContext);
@@ -30,22 +29,17 @@ public static class SecretsBox
         => Cipher.Unprotect(blob, DevContext);
 
     public static string UnprotectString(byte[] blob)
-        => new string(Unprotect(blob), Charset.UTF_8);
+        => Encoding.UTF8.GetString(Unprotect(blob));
 
     public static byte[] RandomBytes(int count)
     {
         var bytes = new byte[count];
-        SecureRandom.getInstanceStrong().nextBytes(bytes);
+        RandomNumberGenerator.Fill(bytes);
         return bytes;
     }
 
     public static string RandomHex(int byteCount)
-    {
-        var sb = new StringBuilder();
-        foreach (var b in RandomBytes(byteCount))
-            sb.Append(Integer.toHexString(b & 0xFF, 2));
-        return sb.ToString();
-    }
+        => Convert.ToHexString(RandomBytes(byteCount)).ToLowerInvariant();
 }
 
 /// <summary>encrypt/decrypt primitive — swappable so tests never touch real DPAPI.</summary>
@@ -56,75 +50,71 @@ public interface SecretCipher
 }
 
 /// <summary>Windows-only DPAPI implementation (default on the deployment target).</summary>
-public sealed class DpapiCipher implements SecretCipher
+public sealed class DpapiCipher : SecretCipher
 {
     public byte[] Protect(byte[] plaintext, string context)
-        => Windows.Data.ProtectedData.Protect(plaintext, context.getBytes(Charset.UTF_8));
+        => ProtectedData.Protect(plaintext, Encoding.UTF8.GetBytes(context), DataProtectionScope.CurrentUser);
 
     public byte[] Unprotect(byte[] blob, string context)
-        => Windows.Data.ProtectedData.Unprotect(blob, context.getBytes(Charset.UTF_8));
+        => ProtectedData.Unprotect(blob, Encoding.UTF8.GetBytes(context), DataProtectionScope.CurrentUser);
 }
 
 /// <summary>
 /// Dev/CI-only AES-256-GCM fallback. Key: PHARMCO_DEV_ENCRYPTION_KEY, else a
 /// per-machine key file under %APPDATA%/Pharmco/dev.key. Never ship to pilots.
+/// Blob layout: 12-byte nonce | ciphertext | 16-byte GCM tag.
 /// </summary>
-public sealed class AesGcmDevCipher implements SecretCipher
+public sealed class AesGcmDevCipher : SecretCipher
 {
-    private const string KeyAlgorithm = "AES/GCM/NoPadding";
+    private const int NonceSize = 12;
+    private const int TagSize = 16;
     private readonly byte[] _key;
 
     public AesGcmDevCipher(byte[] keyMaterial) => _key = keyMaterial;
 
     public static AesGcmDevCipher Open()
     {
-        var env = java.lang.System.getenv("PHARMCO_DEV_ENCRYPTION_KEY");
-        if (env is not null && !env.IsEmpty())
-            return new AesGcmDevCipher(Sha256(env.getBytes(Charset.UTF_8)));
+        var env = Environment.GetEnvironmentVariable("PHARMCO_DEV_ENCRYPTION_KEY");
+        if (!string.IsNullOrEmpty(env))
+            return new AesGcmDevCipher(SHA256.HashData(Encoding.UTF8.GetBytes(env)));
 
         var path = ConfigDir.DataPath("dev.key");
-        var file = new java.io.File(path);
-        if (!file.exists())
+        if (!File.Exists(path))
         {
-            file.getParentFile().mkdirs();
-            java.nio.file.Files.write(file.toPath(), SecretsBox.RandomHex(32).getBytes(Charset.UTF_8));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, SecretsBox.RandomHex(32));
         }
-        return new AesGcmDevCipher(Sha256(java.nio.file.Files.readAllBytes(file.toPath())));
+        return new AesGcmDevCipher(SHA256.HashData(Encoding.UTF8.GetBytes(File.ReadAllText(path))));
     }
 
     public byte[] Protect(byte[] plaintext, string context)
     {
-        var iv = SecretsBox.RandomBytes(12);
-        var cipher = javax.crypto.Cipher.getInstance(KeyAlgorithm);
-        cipher.init(KeyParameter(_key));
-        cipher.updateAad(context.getBytes(Charset.UTF_8));
-        var ct = cipher.doFinal(plaintext);
-        var tag = cipher.doFinalWithTag();                       // GCM authentication tag
-        var out = new byte[12 + ct.Length + tag.Length];
-        System.arraycopy(iv, 0, out, 0, 12);
-        System.arraycopy(ct, 0, out, 12, ct.Length);
-        System.arraycopy(tag, 0, out, 12 + ct.Length, tag.Length);
-        return out;
+        var nonce = SecretsBox.RandomBytes(NonceSize);
+        var cipher = new byte[plaintext.Length];
+        var tag = new byte[TagSize];
+        using var aes = new AesGcm(_key, TagSize);
+        aes.Encrypt(nonce, plaintext, cipher, tag, Encoding.UTF8.GetBytes(context));
+
+        var output = new byte[NonceSize + cipher.Length + TagSize];
+        Buffer.BlockCopy(nonce, 0, output, 0, NonceSize);
+        Buffer.BlockCopy(cipher, 0, output, NonceSize, cipher.Length);
+        Buffer.BlockCopy(tag, 0, output, NonceSize + cipher.Length, TagSize);
+        return output;
     }
 
     public byte[] Unprotect(byte[] blob, string context)
     {
-        if (blob.Length < 12 + 16) throw new java.security.GeneralSecurityException("bad blob");
-        var iv = Arrays.copyOfRange(blob, 0, 12);
-        var ct = Arrays.copyOfRange(blob, 12, blob.Length - 16);
-        var tag = Arrays.copyOfRange(blob, blob.Length - 16, blob.Length);
-        var cipher = javax.crypto.Cipher.getInstance(KeyAlgorithm);
-        cipher.init(KeyParameter(_key), iv);
-        cipher.updateAad(context.getBytes(Charset.UTF_8));
-        cipher.setTag(tag);
-        return cipher.doFinal(ct);
+        if (blob.Length < NonceSize + TagSize)
+            throw new CryptographicException("bad blob");
+
+        var nonce = blob[..NonceSize];
+        var tag = blob[^TagSize..];
+        var cipher = blob[NonceSize..^TagSize];
+        var plaintext = new byte[cipher.Length];
+        using var aes = new AesGcm(_key, TagSize);
+        aes.Decrypt(nonce, cipher, tag, plaintext, Encoding.UTF8.GetBytes(context));
+        return plaintext;
     }
-
-    private static javax.crypto.spec.SecretKeySpec KeyParameter(byte[] key)
-        => new javax.crypto.spec.SecretKeySpec(key, KeyAlgorithm);
-
-    private static byte[] Sha256(byte[] input)
-        => MessageDigest.getInstance("SHA-256").digest(input);
 }
 
 /// <summary>%APPDATA%/Pharmco path helper.</summary>
@@ -132,8 +122,9 @@ public static class ConfigDir
 {
     public static string DataPath(string fileName)
     {
-        var root = java.lang.System.getenv("APPDATA");
-        if (root is null || root.IsEmpty()) root = java.lang.System.getenv("HOME") ?? ".";
-        return root + java.io.File.separator + "Pharmco" + java.io.File.separator + fileName;
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (string.IsNullOrEmpty(root))
+            root = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(root, "Pharmco", fileName);
     }
 }

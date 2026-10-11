@@ -1,0 +1,5 @@
+﻿C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\LicenseEnforcementTests.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\LicenseValidatorTests.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\OfflineSaleTests.cs
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\Pharmco.Client.Tests.csproj
+C:\Users\OPENDESK\Desktop\Pharmco\client\Pharmco.Client.Tests\SyncEngineTests.cs

@@ -1,17 +1,15 @@
-namespace Pharmco.Client.Services;
+﻿namespace Pharmco.Client.Services;
 
-using java.net.URI;
-using java.net.http;
-using java.time;
+using System.Text;
+using System.Text.Json;
 using Pharmco.Client.Models;
 
 /// <summary>
-/// HTTP client for the Pharmco API auth surface. Thin on purpose — the
-/// successor's <c>java.net.http</c> client plus the tiny Json helper.
+/// HTTP client for the Pharmco API auth surface. Thin on purpose.
 /// Endpoints: POST /api/auth/login · POST /api/auth/refresh ·
 /// POST /api/auth/logout · GET /api/auth/session.
 /// </summary>
-public sealed class AuthService
+public sealed class AuthService : IDisposable
 {
     private readonly string _baseUrl;
     private readonly HttpClient _http;
@@ -19,11 +17,10 @@ public sealed class AuthService
     public AuthService(string baseUrl)
     {
         _baseUrl = TrimTrailingSlash(baseUrl);
-        _http = java.net.http.HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .requestTimeout(Duration.ofSeconds(25))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(25),
+        };
     }
 
     // --- login -------------------------------------------------------------------
@@ -35,60 +32,59 @@ public sealed class AuthService
             "username", username,
             "password", password);
         var response = await SendAsync("POST", "/api/auth/login", body, null);
-        if (response.StatusCode() != 200)
-            throw Failure(response);
-        return ParseLogin(response);
+        if ((int) response.StatusCode != 200)
+            throw await FailureAsync(response);
+        return ParseLogin(await ReadBodyAsync(response));
     }
 
     public async Task<LoginResponse> RefreshAsync(string refreshToken)
     {
         var response = await SendAsync("POST", "/api/auth/refresh", Json.Obj("refresh_token", refreshToken), null);
-        if (response.StatusCode() != 200)
-            throw Failure(response);
-        return ParseLogin(response);
+        if ((int) response.StatusCode != 200)
+            throw await FailureAsync(response);
+        return ParseLogin(await ReadBodyAsync(response));
     }
 
     /// <summary>Best-effort: revokes the refresh session server-side. Throws AuthError on failure.</summary>
     public async Task LogoutAsync(string accessToken, string? refreshToken)
     {
-        var body = refreshToken is null || refreshToken.IsEmpty()
+        var body = string.IsNullOrEmpty(refreshToken)
             ? null
             : Json.Obj("refresh_token", refreshToken);
         var response = await SendAsync("POST", "/api/auth/logout", body, accessToken);
-        if (response.StatusCode() != 204 && response.StatusCode() != 401)
-            throw Failure(response);
+        var status = (int) response.StatusCode;
+        if (status != 204 && status != 401)
+            throw await FailureAsync(response);
     }
 
     /// <summary>GET /api/auth/session — true when the access token is still valid.</summary>
     public async Task<bool> ValidateOnlineAsync(string accessToken)
     {
         var response = await SendAsync("GET", "/api/auth/session", null, accessToken);
-        return response.StatusCode() == 200;
+        return (int) response.StatusCode == 200;
     }
 
     // --- internals ----------------------------------------------------------------
 
-    private async Task<HttpResponse> SendAsync(string method, string path, JsonObject? body, string? accessToken)
+    private async Task<HttpResponseMessage> SendAsync(string method, string path, JsonValue? body, string? accessToken)
     {
-        var builder = HttpRequest.newBuilder(URI.Create(_baseUrl + path));
-        builder.header("accept", "application/json");
-        if (accessToken is not null && !accessToken.IsEmpty())
-            builder.header("authorization", "Bearer " + accessToken);
+        using var request = new HttpRequestMessage(new HttpMethod(method), _baseUrl + path);
+        request.Headers.Accept.ParseAdd("application/json");
+        if (!string.IsNullOrEmpty(accessToken))
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
         if (body is not null)
         {
-            builder.header("content-type", "application/json");
-            builder.method(method, HttpRequest.BodyPublishers.ofString(Json.Stringify(body)));
+            request.Content = new StringContent(Json.Stringify(body), Encoding.UTF8, "application/json");
         }
-        else
-        {
-            builder.method(method, HttpRequest.BodyPublishers.noBody());
-        }
-        return await _http.sendAsync(builder.build());
+        return await _http.SendAsync(request);
     }
 
-    private LoginResponse ParseLogin(HttpResponse response) throws AuthError
+    private static async Task<string> ReadBodyAsync(HttpResponseMessage response)
+        => await response.Content.ReadAsStringAsync();
+
+    private static LoginResponse ParseLogin(string json)
     {
-        var root = (JsonObject) Json.Parse(ReadBody(response));
+        var root = (JsonObject) Json.Parse(json);
         var userObj = root.GetObject("user") ?? new JsonObject();
         return new LoginResponse
         {
@@ -105,13 +101,14 @@ public sealed class AuthService
         };
     }
 
-    private AuthError Failure(HttpResponse response)
+    private static async Task<AuthError> FailureAsync(HttpResponseMessage response)
     {
-        string code = "http_" + response.StatusCode();
-        string message = "request failed with status " + response.StatusCode();
+        var status = (int) response.StatusCode;
+        string code = "http_" + status;
+        string message = "request failed with status " + status;
         try
         {
-            var root = (JsonObject) Json.Parse(ReadBody(response));
+            var root = (JsonObject) Json.Parse(await ReadBodyAsync(response));
             var error = root.GetObject("error");
             if (error is not null)
             {
@@ -119,16 +116,17 @@ public sealed class AuthService
                 message = error.GetString("message") ?? message;
             }
         }
-        catch (Throwable) { /* non-JSON error body — keep defaults */ }
+        catch (JsonException) { /* non-JSON error body — keep defaults */ }
+        catch (Json.ParseException) { /* non-JSON error body — keep defaults */ }
         return new AuthError(code, message);
     }
 
-    private static string ReadBody(HttpResponse response) => response.Body().String();
+    public void Dispose() => _http.Dispose();
 
     private static string TrimTrailingSlash(string url)
     {
         var trimmed = url;
-        while (trimmed.EndsWith("/") && trimmed.Length > 1)
+        while (trimmed.EndsWith('/') && trimmed.Length > 1)
             trimmed = trimmed.Substring(0, trimmed.Length - 1);
         return trimmed;
     }

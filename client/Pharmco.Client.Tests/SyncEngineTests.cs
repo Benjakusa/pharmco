@@ -1,5 +1,6 @@
-using Xunit;
+﻿using Xunit;
 using Pharmco.Client.Models;
+using Pharmco.Core.Sales;
 using Pharmco.Client.Services;
 
 namespace Pharmco.Client.Tests;
@@ -59,3 +60,4 @@ public class SyncEngineTests
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 }
+

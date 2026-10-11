@@ -27,7 +27,7 @@ public sealed class SyncEngine : IHostedService, IDisposable
     private bool _isOnline;
 
     // Backoff schedule: 1s, 5s, 30s, 5m, 15m (cap)
-    private static readonly TimeSpan[] BackoffSchedule = new[]
+    public static readonly TimeSpan[] BackoffSchedule = new[]
     {
         TimeSpan.FromSeconds(1),
         TimeSpan.FromSeconds(5),
@@ -281,7 +281,7 @@ public sealed class SyncEngine : IHostedService, IDisposable
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/health");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/health");
             using var response = await _httpClient.SendAsync(request, ct);
             return response.IsSuccessStatusCode;
         }

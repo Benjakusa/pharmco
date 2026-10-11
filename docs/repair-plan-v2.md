@@ -461,4 +461,42 @@ git commit --amend --reset-author --no-edit
 * Rate-limit key shape (`login:<pharmacyCode>:<lowercased username>`) is asserted by unit tests;
   the Redis implementation must keep it byte-for-byte.
 
+### E. Bugs found during the post-commit review pass (recorded, not yet fixed)
+
+**BUG-026 — B — duplicate `TenantScope` type makes the name ambiguous.**
+Two different types carry the same name:
+* `Pharmco.Api.Middleware.TenantContext` + `Pharmco.Api.Middleware.TenantScope`
+  (`Middleware/TenantContext.cs:12-27`) — `ContextKey = "pharmco.tenant"`,
+  `Current(HttpContext) → TenantContext?`.
+* `Pharmco.Core.Tenants.TenantScope` (`Tenants/TenantScope.cs:15-32`) — `RequestKey =
+  "pharmco.tenant_scope"`, instance properties, `Current(HttpContext) → TenantScope?`.
+`Program.cs` imports **both** namespaces (`using Pharmco.Api.Middleware;` and
+`using Pharmco.Core.Tenants;`) and calls the unqualified `TenantScope.Current(http)` in the
+`/v1/tenant/me` handler → **CS0104 ambiguous reference**. `server/Pharmco.Tests/MiddlewareTests.cs`
+has the same double import plus `TenantScope.Current(nextContext)` → also **CS0104**.
+(Inside `TenantResolverMiddleware` there is no ambiguity, because a type in the enclosing namespace
+wins — which is why `TenantScope.ContextKey` compiles there.)
+The two types also disagree on the `HttpContext.Items` key (`"pharmco.tenant"` vs
+`"pharmco.tenant_scope"`), so any reader using the wrong key silently gets `null` → 401.
+Fix: keep exactly one tenant-scope type (grep usages first), align the Items key, and remove the
+now-redundant `using`.
+
+**BUG-027 — B — `LicenseService` is never registered, so sync push returns 500.**
+`SyncEndpoints.PushSync` declares a `LicenseService licenseService` parameter
+(`SyncEndpoints.cs:34`), but `Program.cs` registers only `NpgsqlConnectionFactory`,
+`TenantRepository`, `AuthRepository`, `DarajaService`, `JwtService`, `FailureRateLimiter` and the
+hosted job. Minimal-API parameter binding resolves non-route parameters from DI, so every
+`POST /api/sync/push` fails with `InvalidOperationException: Unable to resolve service for type
+'Pharmco.Core.Licensing.LicenseService'` → **HTTP 500**, i.e. offline sync cannot work at all.
+Fix: if the parameter is genuinely unused in the body, remove it; otherwise register the service.
+Note `LicenseService` only *signs* licenses (private key) and signing should stay in the CLI — do not
+casually hand the API a signing key.
+
+**BUG-028 — M — unvalidated `x-forwarded-for` can make login throw.**
+`AuthRepository.LogLoginAsync` and `InsertRefreshTokenAsync` cast the client IP with
+`NULLIF(@ip, '')::inet` (`AuthRepository.cs:125,180`). The value comes from the client-controlled
+`x-forwarded-for` header (`AuthEndpoints.ClientIp`), so any non-IP string (or an IP with a port)
+makes PostgreSQL raise `22P02 invalid input syntax for type inet` → login/refresh **500**.
+Fix: parse with `IPAddress.TryParse` and pass `null` when invalid.
+
 <!-- END -->

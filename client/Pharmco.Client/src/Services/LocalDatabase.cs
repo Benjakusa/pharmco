@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Pharmco.Client.Models;
+using Pharmco.Core.Sales;
 
 namespace Pharmco.Client.Services;
 
@@ -17,10 +18,13 @@ public sealed class LocalDatabase : IDisposable
     private readonly string _connectionString;
     private SqliteConnection? _connection;
     private readonly string _dbPath;
+    private static int _offlineInvoiceSeq;
 
     public LocalDatabase(string dbPath, string? encryptionKey = null)
     {
         _dbPath = dbPath;
+        if (dbPath != ":memory:")
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dbPath))!);
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
@@ -329,6 +333,13 @@ public sealed class LocalDatabase : IDisposable
 
     public async Task InsertSaleAsync(InFlightSale sale, CancellationToken ct = default)
     {
+        // Offline invoice number: PH-OFFLINE-<YYYYMMDD>-<seq>. The server reissues
+        // canonical numbers during sync if needed.
+        var invoiceNo = InvoiceNumber.Format(
+            "OFFLINE",
+            InvoiceNumber.Day(DateTimeOffset.UtcNow),
+            Interlocked.Increment(ref _offlineInvoiceSeq));
+
         await using var tx = _connection!.BeginTransaction();
         try
         {
@@ -344,7 +355,7 @@ public sealed class LocalDatabase : IDisposable
                     'pending', @created_at, @updated_at, 0)
             ";
             cmd.Parameters.AddWithValue("@id", sale.Id.ToString());
-            cmd.Parameters.AddWithValue("@invoice_no", sale.InvoiceNo);
+            cmd.Parameters.AddWithValue("@invoice_no", invoiceNo);
             cmd.Parameters.AddWithValue("@cashier_user_id", sale.CashierUserId.ToString());
             cmd.Parameters.AddWithValue("@customer_phone", (object?)sale.CustomerPhone ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@total_cents", (long)sale.TotalCents);
@@ -371,6 +382,40 @@ public sealed class LocalDatabase : IDisposable
                 cmd2.Parameters.AddWithValue("@unit_price", (double)line.UnitPriceCents);
                 cmd2.Parameters.AddWithValue("@subtotal", (double)line.SubtotalCents);
                 await cmd2.ExecuteNonQueryAsync(ct);
+            }
+
+            // Queue the sale for upload (spec: offline sales land in the sync queue).
+            var payload = JsonSerializer.Serialize(new
+            {
+                id = sale.Id,
+                tenant_id = sale.TenantId,
+                cashier_user_id = sale.CashierUserId,
+                customer_phone = sale.CustomerPhone,
+                total_cents = sale.TotalCents,
+                payment_mode = sale.PaymentMode.ToString().ToLowerInvariant(),
+                mpesa_ref = sale.MpesaRef,
+                client_sale_uuid = sale.ClientSaleUuid,
+                invoice_no = invoiceNo,
+                lines = sale.Lines.Select(l => new
+                {
+                    product_id = l.ProductId,
+                    qty = l.Qty,
+                    unit_price_cents = l.UnitPriceCents,
+                }).ToList(),
+            });
+            await using (var queueCmd = _connection.CreateCommand())
+            {
+                queueCmd.Transaction = tx;
+                queueCmd.CommandText = @"
+                    INSERT INTO sync_queue (client_uuid, entity, operation, payload_json,
+                        device_id, status, attempts, created_at)
+                    VALUES (@uuid, 'sale', 'create', @payload, @deviceId, 'pending', 0, @now)
+                ";
+                queueCmd.Parameters.AddWithValue("@uuid", sale.Id.ToString());
+                queueCmd.Parameters.AddWithValue("@payload", payload);
+                queueCmd.Parameters.AddWithValue("@deviceId", GetDeviceId());
+                queueCmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("o"));
+                await queueCmd.ExecuteNonQueryAsync(ct);
             }
 
             tx.Commit();

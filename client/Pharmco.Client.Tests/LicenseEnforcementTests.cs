@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Xunit;
 using Pharmco.Client.Services;
 
@@ -19,6 +19,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var canSale = service.IsSaleAllowed();
 
         // Assert
@@ -38,6 +41,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var canSale = service.IsSaleAllowed();
 
         // Assert
@@ -57,6 +63,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var canSale = service.IsSaleAllowed();
 
         // Assert
@@ -76,6 +85,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var canSale = service.IsSaleAllowed();
 
         // Assert
@@ -95,6 +107,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var message = service.GetWarningMessage();
 
         // Assert
@@ -115,6 +130,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var message = service.GetWarningMessage();
 
         // Assert
@@ -133,6 +151,9 @@ public class LicenseEnforcementTests
         };
 
         // Act
+
+
+        service.SetState(state);
         var info = service.GetRenewalInfo();
 
         // Assert
@@ -143,3 +164,4 @@ public class LicenseEnforcementTests
         Assert.Equal("PHARMCO-001", info.TenantCode);
     }
 }
+
