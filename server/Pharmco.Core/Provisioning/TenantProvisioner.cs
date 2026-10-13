@@ -18,7 +18,9 @@ public sealed record ProvisionRequest(
     string Name,
     string OwnerPhone,
     string? AdminUsername = null,
-    int LicenseDays = 365);
+    int LicenseDays = 365,
+    string? AdminPassword = null,
+    IReadOnlyList<(string Username, string Password, string Role)>? ExtraUsers = null);
 
 public sealed record ProvisionResult(
     Guid TenantId,
@@ -64,7 +66,9 @@ public sealed class TenantProvisioner
         if (existing is not null)
             throw new ProvisioningException($"tenant code exists: {request.Code}");
 
-        var tempPassword = CharacterSet.Generate(10);
+        var tempPassword = string.IsNullOrWhiteSpace(request.AdminPassword)
+            ? CharacterSet.Generate(10)
+            : request.AdminPassword;
         var passwordHash = PasswordHasher.Hash(tempPassword);
         var licenseExpiresAt = DateTimeOffset.UtcNow.AddDays(request.LicenseDays);
         var adminUsername = request.AdminUsername ?? $"admin@{request.Code.ToLowerInvariant()}";
@@ -75,6 +79,11 @@ public sealed class TenantProvisioner
         var tenantId = await _repository.InsertAsync(conn, tx, request.Code, request.Name, request.OwnerPhone, schemaName);
         await ApplyTenantSchemaAsync(conn, tx, schemaName, ct);
         await _repository.InsertUserAsync(conn, tx, tenantId, adminUsername, passwordHash);
+        if (request.ExtraUsers is not null)
+        {
+            foreach (var (username, password, role) in request.ExtraUsers)
+                await _repository.InsertUserWithRoleAsync(conn, tx, tenantId, username, PasswordHasher.Hash(password), role);
+        }
 
         var licenseKey = _license.Sign(new LicenseClaims
         {

@@ -54,6 +54,16 @@ public sealed class TenantRepository
             new { id = Guid.NewGuid(), tenantId, username, passwordHash }, tx, commandTimeout: 30);
     }
 
+    public async Task InsertUserWithRoleAsync(
+        NpgsqlConnection conn, NpgsqlTransaction tx,
+        Guid tenantId, string username, string passwordHash, string role)
+    {
+        await conn.ExecuteAsync(
+            @"INSERT INTO master.users (id, tenant_id, username, password_hash, role)
+              VALUES (@id, @tenantId, @username, @passwordHash, @role)",
+            new { id = Guid.NewGuid(), tenantId, username, passwordHash, role }, tx, commandTimeout: 30);
+    }
+
     public async Task<int> CountUsersAsync(Guid tenantId, CancellationToken ct = default)
     {
         await using var conn = await _factory.OpenAsync(ct);

@@ -18,9 +18,10 @@ internal static class Commands
         var phone = opt.Required("owner-phone");
         var admin = opt.Optional("admin-username");
         var days = opt.OptionalInt("license-days") ?? 365;
+        var adminPassword = opt.Optional("admin-password");
 
         var provisioner = CreateProvisioner(needSigningKey: true);
-        var result = await provisioner.ProvisionAsync(new ProvisionRequest(code, name, phone, admin, days));
+        var result = await provisioner.ProvisionAsync(new ProvisionRequest(code, name, phone, admin, days, adminPassword));
 
         Console.WriteLine($"Tenant code:    {result.Code}");
         Console.WriteLine($"Schema name:    {result.SchemaName}");
